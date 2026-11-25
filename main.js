@@ -1,8 +1,8 @@
 // Entoptica — psychedelic layer-pipeline image engine
 import { createGL, compile, makeTarget, freeTarget, makePingPong, freePingPong, pass, makeTex } from './engine/gl.js';
-import { VS, composeFS, FEEDBACK_FS, PALETTE_FS, BRIGHT_FS, BLUR_FS, POST_FS } from './engine/shaders.js';
+import { VS, composeFS, FEEDBACK_FS, PALETTE_FS, BRIGHT_FS, BLUR_FS, POST_FS, FX_FS, COPY_FS } from './engine/shaders.js';
 import { Sims } from './engine/sims.js';
-import { VERSION, SCHEMA, CONTROLS, PALETTES, MAP_PARAMS, PRESETS, defaults, randomizeSection, rangeOf, normOrder, modulatable, lfoValue, randomLFO, LAYER_INFO } from './engine/params.js';
+import { VERSION, SCHEMA, CONTROLS, PALETTES, MAP_PARAMS, PRESETS, defaults, randomizeSection, rangeOf, normOrder, normPP, MAP_KEYS, modulatable, lfoValue, randomLFO, LAYER_INFO } from './engine/params.js';
 import { encodeState, decodeState, copyText } from './engine/share.js';
 import { UI } from './engine/ui.js';
 import { createH264, hasWebCodecs, pickRecorderMime, startMediaRecorder, download } from './engine/video.js';
@@ -51,6 +51,8 @@ class App {
     this.pBright = compile(gl, VS, BRIGHT_FS, 'bright');
     this.pBlur = compile(gl, VS, BLUR_FS, 'blur');
     this.pPost = compile(gl, VS, POST_FS, 'post');
+    this.pFx = compile(gl, VS, FX_FS, 'fx');
+    this.pCopy = compile(gl, VS, COPY_FS, 'copy');
     this.pComp = null; this.compKey = '';
 
     this.photoTex = makeTex(gl, 1, 1, gl.UNSIGNED_BYTE, true, false, new Uint8Array([128, 128, 128, 255]));
@@ -85,7 +87,9 @@ class App {
     const A = this.A, S = this.sims;
     const spec = {
       ph: !!A.ph_on, dw: !!A.dw_on, qc: !!A.qc_on, rd: !!A.rd_on && S.rdOk, py: !!A.py_on && S.pyOk, fr: !!A.fr_on, pt: !!A.pt_on,
-      dwOct: A.dw_oct, dwIter: A.dw_iter, dwBasis: A.dw_wave | 0, order: normOrder(this.P.lay), maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
+      dwOct: A.dw_oct, dwIter: A.dw_iter, dwBasis: A.dw_wave | 0, order: normOrder(this.P.lay), co: this.P.co ? 1 : 0,
+      routes: { ph: A.ph_route | 0, dw: A.dw_route | 0, qc: A.qc_route | 0, rd: A.rd_route | 0, py: A.py_route | 0, fr: A.fr_route | 0, pt: A.pt_route | 0 },
+      maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
     };
     const key = JSON.stringify(spec);
     if (key === this.compKey && this.pComp) return;
@@ -110,7 +114,11 @@ class App {
   }
   undo() { if (this.hi > 0) { this.hi--; this.restore(this.hist[this.hi]); } }
   redo() { if (this.hi < this.hist.length - 1) { this.hi++; this.restore(this.hist[this.hi]); } }
-  paramsChanged(k) { if (k === 'rs') this.resize(); this.save(); }
+  paramsChanged(k) {
+    if (k === 'rs') this.resize();
+    if (/^(sy_mode|m\d_t|fb_amt|fb_loop|pc_amt|pc_post|fx_|\w\w_route)/.test(k)) { clearTimeout(this._rl); this._rl = setTimeout(() => this.ui.renderLayers(), 120); }
+    this.save();
+  }
   mapTypeChanged(i) {
     const t = this.P[`m${i}_t`] | 0, d = MAP_PARAMS[t];
     this.P[`m${i}_a`] = d[2]; this.P[`m${i}_b`] = d[3];
@@ -305,14 +313,15 @@ class App {
   makeTargets(W, H, withFb, type) {
     const gl = this.gl, ty = type || this.core.types.color;
     const bw = Math.max(1, W >> 2), bh = Math.max(1, H >> 2);
-    const T = { W, H, comp: makeTarget(gl, W, H, ty, true), pal: makeTarget(gl, W, H, ty, true), bA: makeTarget(gl, bw, bh, ty, true), bB: makeTarget(gl, bw, bh, ty, true) };
-    if (withFb) { T.fb = makePingPong(gl, W, H, ty, true); this.clearTargets([T.fb.read, T.fb.write, T.pal]); }
+    const T = { W, H, comp: makeTarget(gl, W, H, ty, true), pal: makeTarget(gl, W, H, ty, true), fxT: makeTarget(gl, W, H, ty, true), bA: makeTarget(gl, bw, bh, ty, true), bB: makeTarget(gl, bw, bh, ty, true) };
+    if (withFb) T.end = makeTarget(gl, W, H, ty, true);   // copy of the chain's end, fed back when 'Loop the whole chain' is on
+    if (withFb) { T.fb = makePingPong(gl, W, H, ty, true); this.clearTargets([T.fb.read, T.fb.write, T.pal, T.end]); }
     else T.fbOne = makeTarget(gl, W, H, ty, true);
     return T;
   }
   freeTargets(T) {
     if (!T) return; const gl = this.gl;
-    for (const k of ['comp', 'pal', 'bA', 'bB', 'fbOne', 'out']) freeTarget(gl, T[k]);
+    for (const k of ['comp', 'pal', 'fxT', 'end', 'bA', 'bB', 'fbOne', 'out']) freeTarget(gl, T[k]);
     freePingPong(gl, T.fb);
   }
   clearTargets(list) {
@@ -320,7 +329,7 @@ class App {
     for (const t of list) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  clearFeedback() { if (this.T) this.clearTargets([this.T.fb.read, this.T.fb.write, this.T.pal]); }
+  clearFeedback() { if (this.T) this.clearTargets([this.T.fb.read, this.T.fb.write, this.T.pal, this.T.end]); }
 
   // ---------- parameters per frame ----------
   effective() {
@@ -370,6 +379,24 @@ class App {
     if (i < 0 || j < 0 || j >= o.length) return;
     [o[i], o[j]] = [o[j], o[i]]; this.P.lay = o;
     this.rebuildCompose(); this.ui.renderLayers(); this.commit();
+  }
+  swapCoords() { this.P.co = this.P.co ? 0 : 1; this.rebuildCompose(); this.ui.renderLayers(); this.commit(); }
+  movePP(key, dir) {                  // dir −1 = earlier in the chain, +1 = later
+    const o = normPP(this.P.pp), i = o.indexOf(key), j = i + dir;
+    if (i < 0 || j < 0 || j >= o.length) return;
+    [o[i], o[j]] = [o[j], o[i]]; this.P.pp = o;
+    this.ui.renderLayers(); this.commit();
+  }
+  moveMap(i, dir) {                   // swap map slot i with its neighbour (all params + any LFOs travel with it)
+    const j = i + dir; if (j < 1 || j > 4) return;
+    const P = this.P;
+    for (const k of MAP_KEYS) {
+      const a = `m${i}_${k}`, b = `m${j}_${k}`;
+      [P[a], P[b]] = [P[b], P[a]];
+      const ma = P.mod[a], mb = P.mod[b]; delete P.mod[a]; delete P.mod[b];
+      if (mb) P.mod[a] = mb; if (ma) P.mod[b] = ma;
+    }
+    this.ui.syncAll(); this.applyStruct(false); this.commit();   // explicit action: applies immediately
   }
   // ---------- share links ----------
   async copyLink() {
@@ -445,32 +472,52 @@ class App {
     gl.uniform4f(u.uPy, E.py_op, E.py_scale, E.py_gain, 0);
   }
 
-  // Run the full chain into `out` (null = screen). prevTex = feedback history, fbOut = where feedback writes.
+  // Run the full chain into `out` (null = screen).
+  //   compose → [image chain in the user's order: Feedback / Palette / FX] → bloom → Post
+  // prevTex = feedback history, fbOut = where feedback writes, endOut = optional copy of the chain end (for 'Loop the whole chain').
   // dt = seconds this frame represents; feedback is normalised to a 60 fps reference so preview and renders match at any fps
-  chain(T, out, E, tau, prevTex, fbOut, dt = 1 / 60) {
+  chain(T, out, E, tau, prevTex, fbOut, dt = 1 / 60, endOut = null) {
     const gl = this.gl, c = this.core, W = T.W, H = T.H;
     if (!this.pComp) return;
     pass(c, this.pComp, T.comp, W, H, (u, bind) => this.composeUniforms(u, bind, E, tau, W, H));
-    let src = T.comp;
-    if (E.fb_amt > 0 && fbOut) {
-      pass(c, this.pFb, fbOut, W, H, (u, bind) => {
-        bind('uCur', T.comp.tex); bind('uPrev', prevTex);
-        gl.uniform2f(u.uRes, W, H);
-        const k = Math.min(4, Math.max(.05, dt * 60));
-        gl.uniform4f(u.uFb, Math.pow(E.fb_amt, k), Math.pow(E.fb_zoom, k), E.fb_rot * DEG * k, E.fb_hue * k);
-        gl.uniform4f(u.uFb2, E.fb_dx * k, E.fb_dy * k, E.fb_mode, E.fb_disp * k);
-      });
-      src = fbOut;
+    let cur = T.comp;
+    const fxActive = E.fx_rip > 0 || E.fx_swirl !== 0 || E.fx_glitch > 0 || E.fx_liquid > 0 || E.fx_pix > 1 || E.fx_ht > 0 || E.fx_sol > 0 || E.fx_scan > 0 || E.fx_mirror;
+    for (const st of normPP(E.pp)) {
+      if (st === 'fb' && E.fb_amt > 0 && fbOut) {
+        const src = cur;
+        pass(c, this.pFb, fbOut, W, H, (u, bind) => {
+          bind('uCur', src.tex); bind('uPrev', prevTex);
+          gl.uniform2f(u.uRes, W, H);
+          const k = Math.min(4, Math.max(.05, dt * 60));
+          gl.uniform4f(u.uFb, Math.pow(E.fb_amt, k), Math.pow(E.fb_zoom, k), E.fb_rot * DEG * k, E.fb_hue * k);
+          gl.uniform4f(u.uFb2, E.fb_dx * k, E.fb_dy * k, E.fb_mode, E.fb_disp * k);
+        });
+        cur = fbOut;
+      } else if (st === 'pal' && (E.pc_amt > 0 || E.pc_post > .5)) {
+        const src = cur;
+        pass(c, this.pPal, T.pal, W, H, (u, bind) => {
+          bind('uImg', src.tex); gl.uniform2f(u.uRes, W, H);
+          gl.uniform4f(u.uPc, E.pc_amt, E.pc_off + E.pc_cyc * tau / TAU, E.pc_bands, E.pc_src);
+          gl.uniform1f(u.uPost, E.pc_post);
+          gl.uniform3fv(u.uPP, new Float32Array(this.pal(E.pc_pal, 0)));
+        });
+        cur = T.pal;
+      } else if (st === 'fx' && fxActive) {
+        const src = cur;
+        pass(c, this.pFx, T.fxT, W, H, (u, bind) => {
+          bind('uImg', src.tex); gl.uniform2f(u.uRes, W, H);
+          gl.uniform4f(u.uFx, E.fx_rip, E.fx_rfreq, E.fx_rcyc * tau, E.fx_swirl);
+          gl.uniform4f(u.uFx2, E.fx_glitch, Math.round(E.fx_slices), Math.floor(tau / TAU * Math.max(1, Math.round(E.fx_grate))), E.fx_liquid);
+          gl.uniform4f(u.uFx3, E.fx_pix, E.fx_ht, E.fx_hts, E.fx_sol);
+          gl.uniform4f(u.uFx4, E.fx_scan, E.fx_swr, E.fx_mirror ? 1 : 0, 0);
+        });
+        cur = T.fxT;
+      }
     }
-    pass(c, this.pPal, T.pal, W, H, (u, bind) => {
-      bind('uImg', src.tex); gl.uniform2f(u.uRes, W, H);
-      gl.uniform4f(u.uPc, E.pc_amt, E.pc_off + E.pc_cyc * tau / TAU, E.pc_bands, E.pc_src);
-      gl.uniform1f(u.uPost, E.pc_post);
-      gl.uniform3fv(u.uPP, new Float32Array(this.pal(E.pc_pal, 0)));
-    });
+    if (endOut && E.fb_loop && E.fb_amt > 0) { const src = cur; pass(c, this.pCopy, endOut, W, H, (u, bind) => bind('uImg', src.tex)); }
     const bw = T.bA.w, bh = T.bA.h;
     if (E.po_bloom > 0) {
-      pass(c, this.pBright, T.bA, bw, bh, (u, bind) => { bind('uImg', T.pal.tex); gl.uniform2f(u.uTexel, 1 / W, 1 / H); gl.uniform1f(u.uThr, E.po_bthr); });
+      pass(c, this.pBright, T.bA, bw, bh, (u, bind) => { bind('uImg', cur.tex); gl.uniform2f(u.uTexel, 1 / W, 1 / H); gl.uniform1f(u.uThr, E.po_bthr); });
       const R = E.po_brad | 0;
       for (let i = 0; i < R; i++) {
         const sp = 1 + i;
@@ -479,15 +526,11 @@ class App {
       }
     }
     pass(c, this.pPost, out, W, H, (u, bind) => {
-      bind('uImg', T.pal.tex); bind('uBloom', T.bA.tex);
+      bind('uImg', cur.tex); bind('uBloom', T.bA.tex);
       gl.uniform2f(u.uRes, W, H);
       gl.uniform4f(u.uPo, E.po_chroma, E.po_bloom, E.po_edge, E.po_sat);
       gl.uniform4f(u.uPo2, E.po_con, E.po_bri, E.po_hue, E.po_vig);
       gl.uniform4f(u.uPo3, E.po_grain, E.po_inv ? 1 : 0, this.time * 1.37, 0);
-      gl.uniform4f(u.uFx, E.fx_rip, E.fx_rfreq, E.fx_rcyc * tau, E.fx_swirl);
-      gl.uniform4f(u.uFx2, E.fx_glitch, Math.round(E.fx_slices), Math.floor(tau / TAU * Math.max(1, Math.round(E.fx_grate))), E.fx_liquid);
-      gl.uniform4f(u.uFx3, E.fx_pix, E.fx_ht, E.fx_hts, E.fx_sol);
-      gl.uniform4f(u.uFx4, E.fx_scan, E.fx_swr, E.fx_mirror ? 1 : 0, 0);
     });
   }
 
@@ -502,8 +545,8 @@ class App {
   }
   renderLive(dt = 1 / 60) {
     const E = this.effective(), T = this.T, tau = this.tau();
-    const prev = E.fb_loop ? T.pal.tex : T.fb.read.tex;
-    this.chain(T, null, E, tau, prev, T.fb.write, dt);
+    const prev = E.fb_loop ? T.end.tex : T.fb.read.tex;
+    this.chain(T, null, E, tau, prev, T.fb.write, dt, T.end);
     if (E.fb_amt > 0) T.fb.swap();
   }
 
@@ -536,7 +579,7 @@ class App {
       T = this.makeTargets(W, H, false, gl.UNSIGNED_BYTE);
       T.out = makeTarget(gl, W, H, gl.UNSIGNED_BYTE, false);
       const E = this.effective();
-      const prev = E.fb_loop ? this.T.pal.tex : this.T.fb.read.tex;
+      const prev = E.fb_loop ? this.T.end.tex : this.T.fb.read.tex;
       this.chain(T, T.out, E, this.tau(), prev, T.fbOne);
       const px = new Uint8Array(W * H * 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.out.fb);

@@ -1,5 +1,5 @@
 // Entoptica — panel builder, dual sidebars (desktop), phone tabs, confirm-before-apply
-import { SCHEMA, CONTROLS, rangeOf, modulatable, LFO_WAVES, LAYER_INFO, BLENDS, normOrder } from './params.js';
+import { SCHEMA, CONTROLS, rangeOf, modulatable, LFO_WAVES, LAYER_INFO, BLENDS, normOrder, normPP, PP_INFO, ROUTES, SYM_TYPES, MAP_TYPES } from './params.js';
 
 const LS = 'entoptica.';
 const fmt = (v, step) => step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < .001 ? 4 : step < .01 ? 3 : 2);
@@ -143,28 +143,76 @@ export class UI {
   syncAll() { for (const k in CONTROLS) this.sync(k); this.refreshNotes(); this.renderLayers(); this.syncMods(); }
 
   // ---------- layers panel ----------
+  // Pipeline panel: Coordinates → Layers → Image chain → Post
   renderLayers() {
     const sec = this.sections.layers; if (!sec) return;
     let box = sec.querySelector('.layers'); if (!box) { box = document.createElement('div'); box.className = 'layers'; sec.append(box); }
-    const P = this.app.P, order = normOrder(P.lay);
+    const P = this.app.P, A = this.app.A || P;
     box.innerHTML = '';
-    const hint = document.createElement('div'); hint.className = 'lhint'; hint.textContent = 'Top of the list is drawn last (in front). Each layer blends onto everything below it.';
-    box.append(hint);
+    const group = (title, hint) => {
+      const g = document.createElement('div'); g.className = 'lgroup';
+      const h = document.createElement('div'); h.className = 'lgtitle'; h.textContent = title; g.append(h);
+      if (hint) { const d = document.createElement('div'); d.className = 'lhint'; d.textContent = hint; g.append(d); }
+      box.append(g); return g;
+    };
+    const row = (g, { name, info, off, up, down, onUp, onDown, check, onCheck, jump, fixed, cls }) => {
+      const r = document.createElement('div'); r.className = 'lrow' + (off ? ' off' : '') + (cls ? ' ' + cls : '');
+      if (fixed) { const sp = document.createElement('span'); sp.className = 'lfixed'; sp.textContent = fixed; r.append(sp); }
+      else {
+        const u = document.createElement('button'); u.className = 'mini'; u.textContent = '▲'; u.disabled = !up; u.title = 'Move up'; u.onclick = onUp;
+        const d = document.createElement('button'); d.className = 'mini'; d.textContent = '▼'; d.disabled = !down; d.title = 'Move down'; d.onclick = onDown;
+        r.append(u, d);
+      }
+      if (onCheck) { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!check; cb.title = 'Enable'; cb.onchange = () => onCheck(cb.checked); r.append(cb); }
+      else { const sp = document.createElement('span'); r.append(sp); }
+      const nm = document.createElement('button'); nm.className = 'lname'; nm.textContent = name; nm.title = 'Open settings'; nm.onclick = () => this.jumpTo(jump);
+      const inf = document.createElement('span'); inf.className = 'linfo'; inf.textContent = info || '';
+      r.append(nm, inf); g.append(r); return r;
+    };
+
+    // --- Coordinates ---
+    const gc = group('Coordinates', 'Bend the space the layers are sampled from. Order matters: kaleidoscope-then-warp ≠ warp-then-kaleidoscope.');
+    const nMaps = [1, 2, 3, 4].filter(i => (P[`m${i}_t`] | 0) > 0).length;
+    const coRows = [
+      { key: 'sym', name: 'Symmetry', info: SYM_TYPES[P.sy_mode | 0], off: !(P.sy_mode | 0), jump: 'sym' },
+      { key: 'maps', name: 'Maps', info: nMaps ? `${nMaps} active` : 'none', off: !nMaps, jump: 'maps' },
+    ];
+    const coOrd = P.co ? [coRows[1], coRows[0]] : coRows;
+    coOrd.forEach((c, idx) => row(gc, { ...c, up: idx > 0, down: idx < 1, onUp: () => this.app.swapCoords(), onDown: () => this.app.swapCoords() }));
+    const gm = document.createElement('div'); gm.className = 'lsub'; gc.append(gm);
+    for (let i = 1; i <= 4; i++) {
+      const t = P[`m${i}_t`] | 0;
+      row(gm, { name: `Map ${i}`, info: MAP_TYPES[t], off: !t, up: i > 1, down: i < 4, onUp: () => this.app.moveMap(i, -1), onDown: () => this.app.moveMap(i, +1), jump: 'maps', cls: 'small' });
+    }
+
+    // --- Layers ---
+    const gl = group('Layers', 'Top of the list is drawn last (in front). Each layer blends onto everything below it.');
+    const order = normOrder(P.lay);
     [...order].reverse().forEach((k, idx, arr) => {
       const [name, secId] = LAYER_INFO[k];
-      const row = document.createElement('div'); row.className = 'lrow' + (P[k + '_on'] ? '' : ' off');
-      const up = document.createElement('button'); up.className = 'mini'; up.textContent = '▲'; up.title = 'Move up (toward the front)'; up.disabled = idx === 0;
-      const dn = document.createElement('button'); dn.className = 'mini'; dn.textContent = '▼'; dn.title = 'Move down (toward the back)'; dn.disabled = idx === arr.length - 1;
-      up.onclick = () => this.app.moveLayer(k, +1); dn.onclick = () => this.app.moveLayer(k, -1);
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!P[k + '_on']; cb.title = 'Enable layer';
-      cb.onchange = () => { this.onInput(CONTROLS[k + '_on'], cb.checked); this.sync(k + '_on'); this.app.commit(); };
-      const nm = document.createElement('button'); nm.className = 'lname'; nm.textContent = name; nm.title = 'Open this layer’s settings';
-      nm.onclick = () => this.jumpTo(secId);
-      const info = document.createElement('span'); info.className = 'linfo';
-      info.textContent = `${BLENDS[P[k + '_bl'] | 0]} · ${Math.round((P[k + '_op'] ?? 1) * 100)}%`;
-      row.append(up, dn, cb, nm, info);
-      box.append(row);
+      const rt = P[k + '_route'] | 0;
+      row(gl, {
+        name, jump: secId, off: !P[k + '_on'], check: P[k + '_on'],
+        info: `${BLENDS[P[k + '_bl'] | 0]} · ${Math.round((P[k + '_op'] ?? 1) * 100)}%` + (rt ? ` · ${['', 'sym only', 'maps only', 'straight'][rt]}` : ''),
+        up: idx > 0, down: idx < arr.length - 1,
+        onUp: () => this.app.moveLayer(k, +1), onDown: () => this.app.moveLayer(k, -1),
+        onCheck: (v) => { this.onInput(CONTROLS[k + '_on'], v); this.sync(k + '_on'); this.app.commit(); },
+      });
     });
+
+    // --- Image chain ---
+    const gi = group('Image chain', 'Applied to the finished stack, top to bottom. Post is always last.');
+    const pp = normPP(P.pp);
+    const stInfo = {
+      fb: () => P.fb_amt > 0 ? `${Math.round(P.fb_amt * 100)}%${P.fb_loop ? ' · loops chain' : ''}` : 'off',
+      pal: () => P.pc_amt > 0 || P.pc_post > .5 ? `${Math.round(P.pc_amt * 100)}%` : 'off',
+      fx: () => { const n = ['fx_rip', 'fx_swirl', 'fx_glitch', 'fx_liquid', 'fx_pix', 'fx_ht', 'fx_sol', 'fx_scan'].filter(k => k === 'fx_pix' ? P[k] > 1 : P[k] !== 0).length + (P.fx_mirror ? 1 : 0); return n ? `${n} active` : 'off'; },
+    };
+    pp.forEach((k, idx) => {
+      const inf = stInfo[k]();
+      row(gi, { name: PP_INFO[k][0], info: inf, off: inf === 'off', jump: PP_INFO[k][1], up: idx > 0, down: idx < pp.length - 1, onUp: () => this.app.movePP(k, -1), onDown: () => this.app.movePP(k, +1) });
+    });
+    row(gi, { name: 'Post', info: 'always last', jump: 'post', fixed: '⤓' });
   }
   jumpTo(secId) {
     if (document.body.classList.contains('tabbed')) { this.openTab(secId); return; }

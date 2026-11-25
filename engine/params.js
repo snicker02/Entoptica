@@ -1,5 +1,5 @@
 // Entoptica — parameter schema, palettes, presets, randomizer
-export const VERSION = '0.5.0';
+export const VERSION = '0.6.0';
 
 export const BLENDS = ['Normal', 'Add', 'Screen', 'Multiply', 'Difference', 'Lighten', 'Overlay', 'Exclusion'];
 
@@ -59,8 +59,11 @@ const S = (k, label, opts, v, o = {}) => ({ k, label, t: 'select', opts, v, ...o
 const C = (k, label, v, o = {}) => ({ k, label, t: 'check', v, ...o });
 const B = (k, label, o = {}) => ({ k, label, t: 'button', ...o });
 
+// Which coordinate stages a layer is sampled through (see shaders.js coordCode)
+export const ROUTES = ['Symmetry + Maps', 'Symmetry only', 'Maps only', 'Straight (no warp)'];
 function sourceHead(p, on, op, bl) {
-  return [C(p + '_on', 'Enabled', on, { struct: 1 }), R(p + '_op', 'Opacity', 0, 1, .01, op, { r: [.45, 1] }), S(p + '_bl', 'Blend', BLENDS, bl)];
+  return [C(p + '_on', 'Enabled', on, { struct: 1 }), R(p + '_op', 'Opacity', 0, 1, .01, op, { r: [.45, 1] }), S(p + '_bl', 'Blend', BLENDS, bl),
+    S(p + '_route', 'Coordinates', ROUTES, 0, { struct: 1 })];
 }
 
 function mapSlot(i, type) {
@@ -76,7 +79,7 @@ function mapSlot(i, type) {
 }
 
 export const SCHEMA = [
-  { id: 'layers', title: 'Layers', ctl: [] },   // custom UI: reorderable layer stack
+  { id: 'layers', title: 'Pipeline', ctl: [] },   // custom UI: coordinates order, layer stack, image chain order
   { id: 'photo', title: 'Photo', ctl: [
     ...sourceHead('ph', true, 1, 0),
     B('ph_load', 'Load image / video…', { act: 1 }), B('ph_cam', 'Camera on / off', { act: 1 }), B('ph_test', 'Built-in test card', { act: 1 }),
@@ -192,7 +195,7 @@ export const SCHEMA = [
     R('fb_dx', 'Drift X', -.02, .02, .0005, 0, { r: [-.005, .005] }),
     R('fb_dy', 'Drift Y', -.02, .02, .0005, 0, { r: [-.005, .005] }),
     R('fb_disp', 'Luma displace', -.05, .05, .0005, 0, { r: [-.02, .02] }),
-    C('fb_loop', 'Palette inside loop', false),
+    C('fb_loop', 'Loop the whole chain (Palette/FX feed back too)', false),
     B('fb_clear', 'Clear trails', { act: 1 }),
   ] },
   { id: 'pal', title: 'Palette', ctl: [
@@ -269,6 +272,15 @@ export const LAYER_INFO = {
   dw: ['Warp', 'warp'], ph: ['Photo', 'photo'], qc: ['Quasicrystal', 'quasi'], rd: ['Reaction-Diffusion', 'rd'],
   py: ['Physarum', 'phys'], fr: ['Fractal', 'fractal'], pt: ['Pattern', 'pattern'],
 };
+// Image chain after compositing. Post is always last.
+export const PP_DEFAULT = ['fb', 'pal', 'fx'];
+export const PP_INFO = { fb: ['Feedback', 'fb'], pal: ['Palette', 'pal'], fx: ['FX', 'fx'] };
+export function normPP(o) {
+  const out = [], seen = new Set();
+  for (const k of [...(Array.isArray(o) ? o : []), ...PP_DEFAULT]) if (PP_INFO[k] && !seen.has(k)) { seen.add(k); out.push(k); }
+  return out;
+}
+export const MAP_KEYS = ['t', 'a', 'b', 'sc', 'rot', 'spin'];
 export function normOrder(o) {
   const out = [], seen = new Set();
   for (const k of [...(Array.isArray(o) ? o : []), ...LAYER_DEFAULT]) if (LAYER_INFO[k] && !seen.has(k)) { seen.add(k); out.push(k); }
@@ -307,7 +319,7 @@ export function randomLFO() {
 }
 
 export function defaults() {
-  const P = { vx: 0, vy: 0, vz: 1, vr: 0, lay: [...LAYER_DEFAULT], mod: {} };
+  const P = { vx: 0, vy: 0, vz: 1, vr: 0, lay: [...LAYER_DEFAULT], mod: {}, co: 0, pp: [...PP_DEFAULT] };
   for (const k in CONTROLS) { const c = CONTROLS[k]; if (c.t !== 'button') P[k] = c.v; }
   return P;
 }
@@ -330,12 +342,16 @@ export function randomizeSection(P, secId) {
   if (secId === 'layers') {           // shuffle the stack
     const o = normOrder(P.lay);
     for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; }
-    P.lay = o; return;
+    P.lay = o;
+    if (Math.random() < .3) P.co = P.co ? 0 : 1;
+    if (Math.random() < .25) { const q = normPP(P.pp); for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; } P.pp = q; }
+    return;
   }
   const sec = SCHEMA.find(s => s.id === secId);
   for (const c of sec.ctl) {
     if (c.t === 'button' || c.norand || c.hidden) continue;
     if (c.t === 'check') { if (!c.k.endsWith('_on')) P[c.k] = Math.random() < .3; continue; }
+    if (c.t === 'select' && c.k.endsWith('_route')) { P[c.k] = Math.random() < .7 ? 0 : 1 + Math.floor(Math.random() * 3); continue; }
     if (c.t === 'select') {
       if (c.k.startsWith('m') && c.k.endsWith('_t')) P[c.k] = Math.random() < .45 ? 0 : 1 + Math.floor(Math.random() * (MAP_TYPES.length - 1));
       else P[c.k] = Math.floor(Math.random() * c.opts.length);

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Entoptica — psychedelic image engine</title>
+<meta name="description" content="Layer-pipeline psychedelic image engine: domain warping, quasicrystals, reaction-diffusion, physarum, conformal maps, symmetry, feedback and palette cycling.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css?v=0.2.1">
+</head>
+<body>
+<header id="top">
+  <span class="brand">Entoptica <span id="ver"></span></span>
+  <span class="sub">psychedelic layer pipeline</span>
+  <select id="preset" title="Presets"></select>
+  <button id="rand" title="Randomize everything not locked (R)">🎲 Randomize</button>
+  <button id="undo" title="Undo (Ctrl+Z)">↶</button>
+  <button id="redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+  <button id="play" title="Play / pause (Space)">❚❚</button>
+  <button id="dragmode" title="Toggle what canvas dragging moves: the view or the base image (M)">✥ Moving view</button>
+  <label class="chk confirm"><input type="checkbox" id="confirm"> Confirm changes before applying</label>
+  <button id="apply" title="Apply pending changes (Enter)">Apply</button>
+</header>
+<main id="app">
+  <aside id="sideL" class="sidebar">
+    <div class="sidehead">Sources</div>
+    <div id="panelL" class="panel"></div>
+  </aside>
+  <div id="view">
+    <canvas id="gl"></canvas>
+    <div id="hud"></div>
+    <div id="hint"></div>
+  </div>
+  <aside id="side" class="sidebar">
+    <nav id="tabstrip"></nav>
+    <div class="sidehead">Transform · Color · Output</div>
+    <div id="panel" class="panel"></div>
+    <footer class="credit">Created with help from Claude AI</footer>
+  </aside>
+</main>
+<input type="file" id="file" accept="image/*,video/*" hidden>
+<input type="file" id="jsonfile" accept=".json,application/json" hidden>
+<div id="busy" hidden><div class="box"><div id="busytxt">Rendering…</div><button id="busycancel">Cancel</button></div></div>
+<div id="toast"></div>
+<script type="module" src="main.js?v=0.2.1"></script>
+</body>
+</html>

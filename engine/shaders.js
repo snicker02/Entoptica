@@ -67,6 +67,22 @@ function mapCode(type, i) {
     case 12: return pre + `{ float r = length(z); z = vec2(atan(z.y,z.x)/PI, ${P}.z/(r+0.03) + ${P}.w + ${Q}.y); }\n`;
     case 13: return pre + `{ vec2 c = 0.7885*vec2(cos(${P}.w + ${Q}.y), sin(${P}.w + ${Q}.y)); float n = floor(${P}.z+0.5);
   for (int k=0;k<6;k++){ if (float(k) >= n) break; z = cmul(z,z) + c; if (dot(z,z) > 1e4) break; } z *= 0.5; }\n`;
+    case 14: return pre + `{ vec2 w = z*${P}.z; w.x = clamp(w.x,-12.0,12.0); z = vec2(csh(w.x)*cos(w.y), cch(w.x)*sin(w.y)) * ${P}.w; }\n`;
+    case 15: return pre + `{ vec2 w = z*${P}.z; w.x = clamp(w.x,-12.0,12.0);
+  vec2 sh = vec2(csh(w.x)*cos(w.y), cch(w.x)*sin(w.y)), ch = vec2(cch(w.x)*cos(w.y), csh(w.x)*sin(w.y)); z = cdiv(sh, ch) * ${P}.w; }\n`;
+    case 16: return pre + `{ float r = length(z); z *= pow(r/max(${P}.w,0.05) + 1e-4, ${P}.z - 1.0); }\n`;
+    case 17: return pre + `{ float t = atan(z.y, z.x); z *= 1.0 + ${P}.w*cos(floor(${P}.z+0.5)*t + ${Q}.y); }\n`;
+    case 18: return pre + `z += ${P}.w*vec2(sin(${P}.z*z.y + ${Q}.y), sin(${P}.z*z.x - ${Q}.y));\n`;
+    case 19: return pre + `{ vec2 c = ${P}.w*vec2(cos(0.6 + ${Q}.y), sin(0.6 + ${Q}.y)); float n = floor(${P}.z+0.5);
+  for (int k=0;k<8;k++){ if (float(k) >= n) break; z = abs(z)/max(dot(z,z), 1e-3) - c; } }\n`;
+    case 20: return pre + `{ vec2 f = vec2(${P}.z, 0.0); z = clog(cdiv(z + f, z - f)) * ${P}.w; }\n`;
+    case 21: return pre + `{ float n = floor(${P}.z+0.5);
+  for (int k=0;k<8;k++){ if (float(k) >= n) break; vec2 z2 = cmul(z,z); z -= ${P}.w*cdiv(cmul(z2,z) - vec2(1.0,0.0), 3.0*z2); } }\n`;
+    case 22: return pre + `{ float n = floor(${P}.z+0.5); float r = length(z), t = atan(z.y, z.x);
+  vec2 zn = pow(r+1e-6, n)*vec2(cos(n*t), sin(n*t)); z = zn + cdiv(vec2(${P}.w, 0.0), zn); }\n`;
+    case 23: return pre + `{ float r = length(z) + 1e-6; z = crot(z, ${P}.z*log(r) + ${Q}.y) * pow(r, ${P}.w - 1.0); }\n`;
+    case 24: return pre + `{ vec2 w = cdiv(z - vec2(1.0,0.0), z + vec2(1.0,0.0));
+  w = cmul(w, cexp(vec2(${P}.z, ${P}.w + ${Q}.y))); z = cdiv(vec2(1.0,0.0) + w, vec2(1.0,0.0) - w); }\n`;
     default: return '';
   }
 }
@@ -100,7 +116,7 @@ export function composeFS(S) {
   if (S.py) D.push('#define SRC_PY');
   if (S.fr) D.push('#define SRC_FR');
   if (S.pt) D.push('#define SRC_PT');
-  D.push(`#define DW_OCT ${S.dwOct | 0}`, `#define DW_ITER ${S.dwIter | 0}`);
+  D.push(`#define DW_OCT ${S.dwOct | 0}`, `#define DW_ITER ${S.dwIter | 0}`, `#define DW_BASIS ${S.dwBasis | 0}`);
   let maps = '';
   S.maps.forEach((t, i) => { maps += mapCode(t, i); });
   return PREC + D.join('\n') + '\n' + COMMON + `
@@ -139,9 +155,56 @@ float vnoise(vec2 p){
   float a = hash12(i), b = hash12(i+vec2(1.0,0.0)), c = hash12(i+vec2(0.0,1.0)), d = hash12(i+vec2(1.0,1.0));
   return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
 }
+vec2 hash22(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*vec3(0.1031,0.1030,0.0973)); p3 += dot(p3, p3.yzx+33.33); return fract((p3.xx+p3.yz)*p3.zy); }
+float gnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p); vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);
+  float a = dot(hash22(i)*2.0-1.0, f), b = dot(hash22(i+vec2(1.0,0.0))*2.0-1.0, f-vec2(1.0,0.0));
+  float c = dot(hash22(i+vec2(0.0,1.0))*2.0-1.0, f-vec2(0.0,1.0)), d = dot(hash22(i+vec2(1.0,1.0))*2.0-1.0, f-vec2(1.0,1.0));
+  return clamp(0.5 + 0.9*mix(mix(a,b,u.x), mix(c,d,u.x), u.y), 0.0, 1.0);
+}
+vec2 worley(vec2 p){
+  vec2 g = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0;
+  for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){
+    vec2 b = vec2(float(x), float(y)); vec2 o = hash22(g + b);
+    float d = length(b + o - f);
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return vec2(d1, d2);
+}
+float tri(float x){ return abs(fract(x) - 0.5)*2.0; }
+// Warp basis ("wave type") — every option returns roughly [0,1]
+float basis(vec2 p){
+#if DW_BASIS == 1
+  return gnoise(p);
+#elif DW_BASIS == 2
+  float g = 1.0 - abs(2.0*gnoise(p) - 1.0); return g*g;
+#elif DW_BASIS == 3
+  return abs(2.0*gnoise(p) - 1.0);
+#elif DW_BASIS == 4
+  return 0.5 + 0.5*sin(p.x*PI)*sin(p.y*PI);
+#elif DW_BASIS == 5
+  return 0.5*(tri(p.x*0.5) + tri(p.y*0.5));
+#elif DW_BASIS == 6
+  float sx = smoothstep(0.12, 0.38, abs(fract(p.x*0.5) - 0.5)), sy = smoothstep(0.12, 0.38, abs(fract(p.y*0.5) - 0.5));
+  return sx*sy + (1.0-sx)*(1.0-sy);
+#elif DW_BASIS == 7
+  return clamp(worley(p).x, 0.0, 1.0);
+#elif DW_BASIS == 8
+  vec2 w = worley(p); return clamp((w.y - w.x)*2.0, 0.0, 1.0);
+#elif DW_BASIS == 9
+  return 0.5 + (sin(p.x*2.0) + sin(dot(p, vec2(-1.0, 1.7320508))) + sin(dot(p, vec2(-1.0, -1.7320508))))/6.0;
+#elif DW_BASIS == 10
+  return 0.5 + 0.5*cos(length(fract(p*0.5) - 0.5)*TAU*1.2);
+#elif DW_BASIS == 11
+  vec2 q = fract(p*0.5) - 0.5; float a = atan(q.y, q.x); float r = length(q);
+  return 0.5 + 0.5*sin(a + r*8.0) * smoothstep(0.0, 0.15, r);
+#else
+  return vnoise(p);
+#endif
+}
 float fbm(vec2 p){
   float f = 0.0, a = 0.5, n = 0.0;
-  for (int i=0;i<DW_OCT;i++){ f += a*vnoise(p); n += a; p = mat2(1.6,1.2,-1.2,1.6)*p + vec2(3.1,1.7); a *= 0.5; }
+  for (int i=0;i<DW_OCT;i++){ f += a*basis(p); n += a; p = mat2(1.6,1.2,-1.2,1.6)*p + vec2(3.1,1.7); a *= 0.5; }
   return f/n;
 }
 

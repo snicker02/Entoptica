@@ -83,7 +83,7 @@ class App {
     const A = this.A, S = this.sims;
     const spec = {
       ph: !!A.ph_on, dw: !!A.dw_on, qc: !!A.qc_on, rd: !!A.rd_on && S.rdOk, py: !!A.py_on && S.pyOk, fr: !!A.fr_on, pt: !!A.pt_on,
-      dwOct: A.dw_oct, dwIter: A.dw_iter, maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
+      dwOct: A.dw_oct, dwIter: A.dw_iter, dwBasis: A.dw_wave | 0, maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
     };
     const key = JSON.stringify(spec);
     if (key === this.compKey && this.pComp) return;
@@ -337,7 +337,7 @@ class App {
       let rot = spin, sh = 0;
       if (t === 1) { rot = 0; sh = E[`m${n}_spin`] * Math.log(Math.max(1.01, a)) * tau / TAU; }
       else if (t === 4) { rot = 0; sh = spin / Math.max(1, Math.round(a)); }
-      else if (t === 11 || t === 13) { rot = 0; sh = spin; }
+      else if ([11, 13, 17, 18, 19, 23, 24].includes(t)) { rot = 0; sh = spin; }   // spin drives the map's own phase (seamless per loop)
       else if (t === 12) { rot = 0; sh = E[`m${n}_spin`] * tau / Math.PI * 2; }
       M.set([E[`m${n}_sc`], E[`m${n}_rot`] * DEG, a, b, rot, sh, 0, 0], i * 8);
     }

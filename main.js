@@ -2,7 +2,8 @@
 import { createGL, compile, makeTarget, freeTarget, makePingPong, freePingPong, pass, makeTex } from './engine/gl.js';
 import { VS, composeFS, FEEDBACK_FS, PALETTE_FS, BRIGHT_FS, BLUR_FS, POST_FS } from './engine/shaders.js';
 import { Sims } from './engine/sims.js';
-import { VERSION, SCHEMA, CONTROLS, PALETTES, MAP_PARAMS, PRESETS, defaults, randomizeSection } from './engine/params.js';
+import { VERSION, SCHEMA, CONTROLS, PALETTES, MAP_PARAMS, PRESETS, defaults, randomizeSection, rangeOf, normOrder, modulatable, lfoValue, randomLFO, LAYER_INFO } from './engine/params.js';
+import { encodeState, decodeState, copyText } from './engine/share.js';
 import { UI } from './engine/ui.js';
 import { createH264, hasWebCodecs, pickRecorderMime, startMediaRecorder, download } from './engine/video.js';
 
@@ -21,7 +22,6 @@ const LS = 'entoptica.';
 const STRUCT = Object.keys(CONTROLS).filter(k => CONTROLS[k].struct);
 const SOURCES = ['ph', 'dw', 'qc', 'rd', 'py', 'fr', 'pt'];
 const SRC_SEC = { ph: 'photo', dw: 'warp', qc: 'quasi', rd: 'rd', py: 'phys', fr: 'fractal', pt: 'pattern' };
-const COMPOSE_ORDER = ['dw', 'ph', 'qc', 'rd', 'py', 'fr', 'pt']; // layer order inside the compose shader
 const NO_MORPH = /(_spin|_flow|qc_speed|pc_cyc|fr_cyc|pt_cyc|fx_rcyc|fx_grate|fx_slices|pt_k|^mo_|_steps|^rs$|^rec_|^png_)/;
 const RD_SIZES = [256, 512, 1024], PY_SIDES = [128, 256, 512, 1024], PY_TRAILS = [256, 512, 1024];
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
@@ -63,6 +63,8 @@ class App {
     this.wireInput();
     this.applyStruct(true);
     this.commit();
+    this.loadFromHash();
+    addEventListener('hashchange', () => this.loadFromHash());
 
     new ResizeObserver(() => this.resize()).observe(this.view);
     this.resize();
@@ -83,7 +85,7 @@ class App {
     const A = this.A, S = this.sims;
     const spec = {
       ph: !!A.ph_on, dw: !!A.dw_on, qc: !!A.qc_on, rd: !!A.rd_on && S.rdOk, py: !!A.py_on && S.pyOk, fr: !!A.fr_on, pt: !!A.pt_on,
-      dwOct: A.dw_oct, dwIter: A.dw_iter, dwBasis: A.dw_wave | 0, maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
+      dwOct: A.dw_oct, dwIter: A.dw_iter, dwBasis: A.dw_wave | 0, order: normOrder(this.P.lay), maps: [A.m1_t, A.m2_t, A.m3_t, A.m4_t].map(v => v | 0), sym: A.sy_mode | 0,
     };
     const key = JSON.stringify(spec);
     if (key === this.compKey && this.pComp) return;
@@ -129,10 +131,16 @@ class App {
       this.P[(base.length ? base : ['dw'])[Math.floor(Math.random() * (base.length || 1))] + '_on'] = true;
     }
     // first layer in compose order is opaque Normal so nothing blends onto black
-    const first = COMPOSE_ORDER.find(s => this.P[s + '_on']);
+    const first = normOrder(this.P.lay).find(s => this.P[s + '_on']);
     if (first && !this.locked(SRC_SEC[first])) { this.P[first + '_bl'] = 0; this.P[first + '_op'] = Math.max(.85, this.P[first + '_op']); }
     if (!this.locked('fb') && Math.random() < .45) this.P.fb_amt = 0;
     if (!this.locked('fx')) for (const k of ['fx_rip', 'fx_swirl', 'fx_glitch', 'fx_liquid', 'fx_sol']) if (Math.random() < .6) this.P[k] = 0;
+    if (!this.locked('layers') && Math.random() < .35) randomizeSection(this.P, 'layers');
+    // keep the bottom-most enabled layer opaque Normal after any shuffle
+    const base0 = normOrder(this.P.lay).find(s => this.P[s + '_on']);
+    if (base0 && !this.locked(SRC_SEC[base0])) { this.P[base0 + '_bl'] = 0; this.P[base0 + '_op'] = Math.max(.85, this.P[base0 + '_op']); }
+    // never wipe LFOs the user set up; occasionally add some when there are none
+    if (!this.P.mod || !Object.keys(this.P.mod).length) { this.P.mod = {}; if (Math.random() < .4) this.addRandomLFOs(1 + Math.floor(Math.random() * 2), true); }
     this.afterBigChange(true);
   }
   afterBigChange(reseed) {
@@ -158,6 +166,7 @@ class App {
       ps.value = '';
     };
     $('rand').onclick = () => this.randomizeAll();
+    $('linkBtn').onclick = () => this.copyLink();
     $('undo').onclick = () => this.undo();
     $('redo').onclick = () => this.redo();
     $('play').onclick = () => this.togglePlay();
@@ -186,6 +195,8 @@ class App {
       case 'mo_capA': this.morphA = { ...P }; this.toast('Captured A'); break;
       case 'mo_capB': this.morphB = { ...P }; this.toast('Captured B — enable Morph to animate'); break;
       case 'mo_view': Object.assign(P, { vx: 0, vy: 0, vz: 1, vr: 0 }); this.commit(); break;
+      case 'mo_lfo_rand': this.addRandomLFOs(3, false); this.ui.syncMods(); this.commit(); this.toast(`${Object.keys(this.P.mod).length} LFOs active`); break;
+      case 'mo_lfo_clear': this.P.mod = {}; this.ui.syncMods(); this.commit(); this.toast('All LFOs cleared'); break;
       case 'png': this.savePNG(); break;
       case 'rec_loop': this.renderLoop(); break;
       case 'rec_live': this.toggleLive(); break;
@@ -314,15 +325,75 @@ class App {
   // ---------- parameters per frame ----------
   effective() {
     const P = this.P;
-    if (!(P.mo_morph && this.morphA && this.morphB)) return P;
-    const w = .5 - .5 * Math.cos(this.tau() * P.mo_mcyc);
-    const E = { ...P }, A = this.morphA, B = this.morphB;
-    for (const k in E) {
-      const c = CONTROLS[k];
-      if (!c || c.t !== 'range' || c.struct || NO_MORPH.test(k)) continue;
-      if (typeof A[k] === 'number' && typeof B[k] === 'number') E[k] = A[k] + (B[k] - A[k]) * w;
+    let E = P;
+    if (P.mo_morph && this.morphA && this.morphB) {
+      const w = .5 - .5 * Math.cos(this.tau() * P.mo_mcyc);
+      const A = this.morphA, B = this.morphB;
+      E = { ...P };
+      for (const k in E) {
+        const c = CONTROLS[k];
+        if (!c || c.t !== 'range' || c.struct || NO_MORPH.test(k)) continue;
+        if (typeof A[k] === 'number' && typeof B[k] === 'number') E[k] = A[k] + (B[k] - A[k]) * w;
+      }
+    }
+    // LFO modulation: base value + depth × range × wave(loop phase), clamped to the slider range
+    const mods = P.mod && Object.keys(P.mod);
+    if (mods && mods.length) {
+      if (E === P) E = { ...P };
+      const u = this.tau() / TAU;
+      for (const k of mods) {
+        if (!modulatable(k) || typeof E[k] !== 'number') continue;
+        const m = P.mod[k], r = rangeOf(CONTROLS[k], E);
+        let v = E[k] + (m.d || 0) * (r.max - r.min) * lfoValue(m, u, k);
+        v = Math.min(r.max, Math.max(r.min, v));
+        if (r.step >= 1) v = Math.round(v);
+        E[k] = v;
+      }
     }
     return E;
+  }
+  addRandomLFOs(n, sourcesOnly) {
+    // pick sliders from sections that are actually doing something
+    const live = (k) => {
+      const sec = CONTROLS[k].sec, src = Object.keys(SRC_SEC).find(s => SRC_SEC[s] === sec);
+      if (src) return !!this.P[src + '_on'];
+      if (sec === 'maps') return (this.P[`m${k[1]}_t`] | 0) > 0;
+      if (sec === 'fb') return this.P.fb_amt > 0 || k === 'fb_amt';
+      return !sourcesOnly;
+    };
+    const keys = Object.keys(CONTROLS).filter(k => modulatable(k) && live(k) && !/_(op|on)$/.test(k) && !this.P.mod[k]);
+    for (let i = 0; i < n && keys.length; i++) { const k = keys.splice(Math.floor(Math.random() * keys.length), 1)[0]; this.P.mod[k] = randomLFO(); }
+  }
+  // ---------- layers ----------
+  moveLayer(key, dir) {               // dir +1 = up (toward the front), −1 = down
+    const o = normOrder(this.P.lay), i = o.indexOf(key), j = i + dir;
+    if (i < 0 || j < 0 || j >= o.length) return;
+    [o[i], o[j]] = [o[j], o[i]]; this.P.lay = o;
+    this.rebuildCompose(); this.ui.renderLayers(); this.commit();
+  }
+  // ---------- share links ----------
+  async copyLink() {
+    try {
+      const code = await encodeState(this.P);
+      const url = location.href.split('#')[0] + '#s=' + code;
+      const ok = await copyText(url);
+      if (ok) this.toast(`Link copied (${url.length} chars)${this.P.ph_on ? ' — your photo isn’t included, only the settings' : ''}`);
+      else window.prompt('Copy this link:', url);
+    } catch (e) { this.toast('Could not make a link: ' + e.message); }
+  }
+  async loadFromHash() {
+    const m = /^#s=(.+)$/.exec(location.hash);
+    if (!m) return;
+    try {
+      const part = await decodeState(m[1]);
+      const keep = {};
+      for (const k in this.P) if (CONTROLS[k] && CONTROLS[k].sec === 'out') keep[k] = this.P[k];
+      this.P = Object.assign(defaults(), part, keep);
+      this.clearFeedback();
+      this.afterBigChange(true);
+      this.toast('Loaded shared look' + (this.P.ph_on ? ' — load your own image in Photo, or use the test card' : ''));
+    } catch (e) { this.toast('Could not read that link: ' + e.message); }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
   }
   tau() { const L = Math.max(.5, this.P.mo_loop); return ((this.time % L) / L) * TAU; }
   pal(i, off) { const p = PALETTES[i | 0] || PALETTES[0]; return [...p[1], ...p[2], ...p[3], ...p[4]].map((v, j) => j >= 9 ? v + off : v); }
@@ -442,6 +513,7 @@ class App {
       this.advance(dt);
       this.renderLive(dt);
       if (this.live && this.live.enc) this.live.enc.addCanvasSync(this.canvas, (now - this.live.t0) * 1000, dt * 1e6);
+      if ((this._mb = (this._mb || 0) + 1) % 4 === 0 && this.P.mod && Object.keys(this.P.mod).length) this.ui.updateModBars(this.effective());
       this.fpsAcc += dt; this.fpsN++;
       if (this.fpsAcc > .5) {
         $('hud').textContent = `${Math.round(this.fpsN / this.fpsAcc)} fps · ${this.canvas.width}×${this.canvas.height}${this.live ? ' · ● REC' : ''}`;

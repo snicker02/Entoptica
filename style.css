@@ -108,3 +108,25 @@ body.tabbed.pending #apply { position: fixed; z-index: 15; right: 10px; top: cal
   .mini { min-height: 30px; }
   input[type=checkbox] { width: 19px; height: 19px; }
 }
+
+/* ---------- layers panel ---------- */
+.layers { display: flex; flex-direction: column; gap: 4px; }
+.lhint { font-size: 10.5px; color: var(--dim); margin-bottom: 2px; }
+.lrow { display: grid; grid-template-columns: auto auto auto 1fr auto; gap: 5px; align-items: center; background: #1b1724; border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; }
+.lrow.off { opacity: .5; }
+.lrow .mini:disabled { opacity: .25; cursor: default; }
+.lname { background: none; border: 0; text-align: left; padding: 2px 4px; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.lname:hover { color: var(--acc2); }
+.linfo { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+
+/* ---------- LFO controls ---------- */
+.lright { display: inline-flex; align-items: center; gap: 6px; }
+button.lfo { padding: 0 6px; font-size: 12px; line-height: 16px; border-radius: 4px; color: var(--dim); background: transparent; }
+.ctl.modded button.lfo { color: #fff; background: var(--acc); border-color: var(--acc); }
+.modbar { position: relative; height: 3px; margin: -1px 0 3px; background: #2a2436; border-radius: 2px; }
+.modbar i { position: absolute; top: -2px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--acc2); box-shadow: 0 0 6px var(--acc2); }
+.lfoed { background: #1a1522; border: 1px solid #3a2a44; border-radius: 6px; padding: 5px 7px; margin: 2px 0 6px; }
+.lfrow { display: grid; grid-template-columns: 52px 1fr auto; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
+.lfrow select { grid-column: 2 / 4; }
+.lfrow.end { display: flex; justify-content: flex-end; margin-top: 3px; }
+@media (pointer: coarse) { button.lfo { min-height: 28px; padding: 0 10px; } }

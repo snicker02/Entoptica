@@ -1,5 +1,5 @@
 // Entoptica — parameter schema, palettes, presets, randomizer
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 
 export const BLENDS = ['Normal', 'Add', 'Screen', 'Multiply', 'Difference', 'Lighten', 'Overlay', 'Exclusion'];
 
@@ -76,6 +76,7 @@ function mapSlot(i, type) {
 }
 
 export const SCHEMA = [
+  { id: 'layers', title: 'Layers', ctl: [] },   // custom UI: reorderable layer stack
   { id: 'photo', title: 'Photo', ctl: [
     ...sourceHead('ph', true, 1, 0),
     B('ph_load', 'Load image / video…', { act: 1 }), B('ph_cam', 'Camera on / off', { act: 1 }), B('ph_test', 'Built-in test card', { act: 1 }),
@@ -242,6 +243,7 @@ export const SCHEMA = [
     R('mo_mcyc', 'Morph cycles /loop', 1, 4, 1, 1, { norand: 1 }),
     B('mo_capA', 'Capture A', { act: 1 }), B('mo_capB', 'Capture B', { act: 1 }),
     B('mo_view', 'Reset view', { act: 1 }),
+    B('mo_lfo_rand', '~ Random LFOs', { act: 1 }), B('mo_lfo_clear', 'Clear all LFOs', { act: 1 }),
   ] },
   { id: 'out', title: 'Output', ctl: [
     R('rs', 'Render scale', .25, 1.5, .05, 1, { norand: 1 }),
@@ -260,8 +262,52 @@ export const SCHEMA = [
 export const CONTROLS = {};
 for (const sec of SCHEMA) for (const c of sec.ctl) { c.sec = sec.id; CONTROLS[c.k] = c; }
 
+// ---------- layers ----------
+// Compose order, bottom → top. Keys match the source prefixes.
+export const LAYER_DEFAULT = ['dw', 'ph', 'qc', 'rd', 'py', 'fr', 'pt'];
+export const LAYER_INFO = {
+  dw: ['Warp', 'warp'], ph: ['Photo', 'photo'], qc: ['Quasicrystal', 'quasi'], rd: ['Reaction-Diffusion', 'rd'],
+  py: ['Physarum', 'phys'], fr: ['Fractal', 'fractal'], pt: ['Pattern', 'pattern'],
+};
+export function normOrder(o) {
+  const out = [], seen = new Set();
+  for (const k of [...(Array.isArray(o) ? o : []), ...LAYER_DEFAULT]) if (LAYER_INFO[k] && !seen.has(k)) { seen.add(k); out.push(k); }
+  return out;
+}
+
+// ---------- modulation (LFOs) ----------
+export const LFO_WAVES = ['Sine', 'Triangle', 'Saw up', 'Saw down', 'Square', 'Stepped random', 'Smooth random'];
+// A slider can carry an LFO if it is a live (non-structural) range outside Motion/Output
+export function modulatable(k) {
+  const c = CONTROLS[k];
+  return !!c && c.t === 'range' && !c.struct && !['motion', 'out'].includes(c.sec);
+}
+const hash1 = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+// Bipolar wave value in [-1, 1]. u = position in loop [0,1). Whole cycles per loop keep every wave seamless.
+export function lfoValue(m, u, key) {
+  const c = Math.round(m.c) || 1, t = u * Math.abs(c) * (c < 0 ? -1 : 1) + (m.p || 0);
+  const f = t - Math.floor(t);
+  const seed = (key || '').split('').reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) % 9973;
+  switch (m.w | 0) {
+    case 1: return 1 - 4 * Math.abs(f - .5);
+    case 2: return 2 * f - 1;
+    case 3: return 1 - 2 * f;
+    case 4: { const s = Math.sin(f * Math.PI * 2); return Math.max(-1, Math.min(1, s * 6)); }
+    case 5: { const n = Math.abs(c), i = Math.floor(t) % n; return hash1(seed + ((i + n) % n)) * 2 - 1; }
+    case 6: {
+      const n = Math.abs(c) * 2, tt = t * 2, i0 = Math.floor(tt), fr = tt - i0;
+      const a = hash1(seed + ((i0 % n) + n) % n) * 2 - 1, b = hash1(seed + (((i0 + 1) % n) + n) % n) * 2 - 1;
+      return a + (b - a) * (.5 - .5 * Math.cos(fr * Math.PI));
+    }
+    default: return Math.sin(f * Math.PI * 2);
+  }
+}
+export function randomLFO() {
+  return { w: Math.floor(Math.random() * LFO_WAVES.length), c: [1, 1, 1, 2, 2, 3, -1, -2][Math.floor(Math.random() * 8)], d: +(0.04 + Math.random() * 0.14).toFixed(2), p: +Math.random().toFixed(2) };
+}
+
 export function defaults() {
-  const P = { vx: 0, vy: 0, vz: 1, vr: 0 };
+  const P = { vx: 0, vy: 0, vz: 1, vr: 0, lay: [...LAYER_DEFAULT], mod: {} };
   for (const k in CONTROLS) { const c = CONTROLS[k]; if (c.t !== 'button') P[k] = c.v; }
   return P;
 }
@@ -281,6 +327,11 @@ function rnd(a, b) { return a + Math.random() * (b - a); }
 function quant(v, step, min) { return step >= 1 ? Math.round(v) : Math.round((v - min) / step) * step + min; }
 
 export function randomizeSection(P, secId) {
+  if (secId === 'layers') {           // shuffle the stack
+    const o = normOrder(P.lay);
+    for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; }
+    P.lay = o; return;
+  }
   const sec = SCHEMA.find(s => s.id === secId);
   for (const c of sec.ctl) {
     if (c.t === 'button' || c.norand || c.hidden) continue;

@@ -106,6 +106,138 @@ function symCode(mode) {
   }
 }
 
+// Per-source layer code, emitted bottom → top in the user's layer order
+const LAYER_CODE = {
+  dw: `  {
+    vec3 s = cosPal(dwv*uDw.w + length(dwo)*0.6, uPal[0], uPal[1], uPal[2], uPal[3]) * (0.35 + 0.9*dwv);
+    col = layer(col, s, uDw.x, uBl.y);
+  }
+`,
+  ph: `  {
+    vec2 zp = crot(z - uPhT.xy, -uPhT.z) / uPh.y * uPhFlip;
+    vec2 uv = (zp + wv*uPh.z*2.0) * uPhAsp * 0.5 + 0.5;
+    float inside = 1.0;
+    vec2 tuv = mirror(uv);
+    if (uPhEdge > 1.5) { inside = step(0.0, uv.x)*step(uv.x, 1.0)*step(0.0, uv.y)*step(uv.y, 1.0); tuv = clamp(uv, 0.0, 1.0); }
+    else if (uPhEdge > 0.5) tuv = fract(uv);
+    vec3 s = texture2D(uPhoto, tuv).rgb;
+    s = hueShift(s, uPh.w);
+    s = mix(vec3(luma(s)), s, uPhSat);
+    col = layer(col, s, uPh.x*inside, uBl.x);
+  }
+`,
+  qc: `  {
+    float sum = 0.0; int n = int(uQc2.x);
+    float ph = uQc.z + uQc2.y*length(z);
+    for (int i=0;i<16;i++){
+      if (i >= n) break;
+      float a = float(i)*PI/uQc2.x;
+      sum += cos(dot(z, vec2(cos(a), sin(a)))*uQc.y + ph);
+    }
+    sum /= uQc2.x;
+    float v = sum*uQc.w;
+    if (uQc2.z > 1.5) v = smoothstep(-0.05, 0.05, sum)*0.5 + sum*0.1;
+    else if (uQc2.z > 0.5) v = abs(sum)*uQc.w;
+    float lum = 0.55 + 0.45*clamp(sum*1.5 + 0.3, -1.0, 1.0);
+    vec3 s = cosPal(v*0.5, uPal[4], uPal[5], uPal[6], uPal[7]) * lum;
+    col = layer(col, s, uQc.x, uBl.z);
+  }
+`,
+  rd: `  {
+    vec2 uv = mirror(z/uRd.y*0.5 + 0.5 + wv*0.05);
+    float v = texture2D(uRD, uv).g;
+    v = clamp(v*2.5, 0.0, 1.0);
+    if (uRd.z > 0.5) v = 1.0 - v;
+    vec3 s = cosPal(v*uRd.w*0.5, uPal[8], uPal[9], uPal[10], uPal[11]) * smoothstep(0.0, 0.35, v);
+    col = layer(col, s, uRd.x, uBl.w);
+  }
+`,
+  py: `  {
+    vec2 uv = mirror(z/uPy.y*0.5 + 0.5 + wv*0.05);
+    float t = texture2D(uPY, uv).r;
+    float v = 1.0 - exp(-t*uPy.z);
+    vec3 s = cosPal(v*0.85, uPal[12], uPal[13], uPal[14], uPal[15]) * v * 1.2;
+    col = layer(col, s, uPy.x, uBl2.x);
+  }
+`,
+  fr: `  {
+    // escape-time fractal with orbit traps. uFr: op, zoom, iters, density. uFr2: type, trap, cx, cy
+    vec2 p = z / uFr.y + uFr2.zw;
+    vec2 c = uFrC, w = p;
+    if (uFr2.x > 0.5 && uFr2.x < 1.5) { c = p; w = vec2(0.0); }
+    float trap = 1e9, n = 0.0, m2 = 0.0, esc = 0.0;
+    for (int i=0;i<200;i++){
+      if (float(i) >= uFr.z) break;
+      if (uFr2.x > 1.5) w = abs(w);
+      w = cmul(w, w) + c;
+      m2 = dot(w, w);
+      float t = uFr2.y < 1.5 ? m2 : (uFr2.y < 2.5 ? abs(sqrt(m2) - 0.7) : min(abs(w.x), abs(w.y)));
+      trap = min(trap, t);
+      if (m2 > 256.0) { esc = 1.0; break; }
+      n += 1.0;
+    }
+    float v, lum;
+    if (uFr2.y < 0.5) {
+      float sn = n - log2(max(log2(max(m2, 1.0001)), 1e-4)) + 4.0;
+      v = sn * 0.035 * uFr.w; lum = esc * (0.25 + 0.75*smoothstep(0.0, 6.0, sn));
+    } else {
+      float st = sqrt(trap);
+      v = st * 1.6 * uFr.w + n * 0.015;
+      lum = 0.28 + 0.95*exp(-st * 2.5);
+    }
+    vec3 s = cosPal(v, uPal[16], uPal[17], uPal[18], uPal[19]) * lum;
+    col = layer(col, s, uFr.x, uBl2.y);
+  }
+`,
+  pt: `  {
+    // op-art patterns. uPt: op, scale, count, sharp. uPt2: mode, phase, twist, _
+    vec2 q = z * uPt.y;
+    float r = length(q), a = atan(q.y, q.x), v = 0.0, edge = 1.0;
+    float ph = uPt2.y, k = uPt.z, sh = uPt.w;
+    if (uPt2.x < 0.5) {                      // hypnotic spiral
+      float sw = sin(k*a + uPt2.z*log(r + 1e-3)*6.0 - ph);
+      v = 0.5 + 0.5*clamp(sw*sh, -1.0, 1.0);
+    } else if (uPt2.x < 1.5) {               // moire rings
+      vec2 o = 0.35*vec2(cos(ph), sin(ph));
+      float m = sin(length(q - o)*k*3.0) * sin(length(q + o)*k*3.0 + uPt2.z*a);
+      v = 0.5 + 0.5*clamp(m*sh, -1.0, 1.0);
+    } else if (uPt2.x < 2.5) {               // voronoi cells
+      vec2 g = floor(q*k*0.5), f = fract(q*k*0.5);
+      float d1 = 8.0, d2 = 8.0; float id = 0.0;
+      for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){
+        vec2 b = vec2(float(x), float(y));
+        float h = hash12(g + b);
+        vec2 o = 0.5 + 0.4*sin(ph + TAU*vec2(h, hash12(g + b + 17.3)));
+        float d = length(b + o - f);
+        if (d < d1) { d2 = d1; d1 = d; id = h; } else if (d < d2) d2 = d;
+      }
+      v = id + uPt2.z*d1;
+      edge = smoothstep(0.0, 0.08/max(sh*0.25, 0.05), d2 - d1);
+    } else if (uPt2.x < 3.5) {               // truchet arcs
+      vec2 g = floor(q*k*0.5), f = fract(q*k*0.5) - 0.5;
+      if (hash12(g) > 0.5) f.x = -f.x;
+      float d = min(abs(length(f - 0.5) - 0.5), abs(length(f + 0.5) - 0.5));
+      float band = 0.5 + 0.5*sin(d*TAU*2.0 - ph + uPt2.z*r);
+      v = band + hash12(g)*0.3;
+      edge = smoothstep(0.02, 0.02 + 0.3/max(sh, 0.2), 0.25 - d) * 0.8 + 0.2;
+    } else {                                 // warped checker
+      vec2 w = q*k*0.5 + 0.35*vec2(sin(q.y*2.0 + ph), sin(q.x*2.0 - ph)) + uPt2.z*vec2(-q.y, q.x)*0.2;
+      float c = sin(w.x*PI)*sin(w.y*PI);
+      v = 0.5 + 0.5*clamp(c*sh, -1.0, 1.0);
+      v += 0.15*r;
+    }
+    vec3 s = cosPal(v, uPal[20], uPal[21], uPal[22], uPal[23]) * edge;
+    col = layer(col, s, uPt.x, uBl2.z);
+  }
+`,
+};
+export const DEFAULT_ORDER = ['dw', 'ph', 'qc', 'rd', 'py', 'fr', 'pt'];
+function layerCode(order) {
+  const seen = new Set(), list = [];
+  for (const k of [...(order || []), ...DEFAULT_ORDER]) if (LAYER_CODE[k] && !seen.has(k)) { seen.add(k); list.push(k); }
+  return list.map(k => `#ifdef SRC_${k.toUpperCase()}\n${LAYER_CODE[k]}#endif\n`).join('');
+}
+
 export function composeFS(S) {
   // S: { ph, dw, qc, rd, py, dwOct, dwIter, maps:[t1..t4], sym }
   const D = [];
@@ -215,145 +347,21 @@ ${symCode(S.sym)}
 ${maps}
   if (!(abs(z.x) < 1e4)) z.x = 1e4; if (!(abs(z.y) < 1e4)) z.y = 1e4;
   vec3 col = vec3(0.0);
+  // warp field is computed up front so photo/RD/physarum displacement works whatever the layer order
   vec2 wv = vec2(0.0);
 #ifdef SRC_DW
+  vec2 dwo = vec2(0.0); float dwv = 0.0;
   {
     vec2 q = z*uDw.y + uDwFlow;
-    vec2 o = vec2(0.0);
     for (int i=0;i<DW_ITER;i++){
       float fi = float(i+1);
-      o = vec2(fbm(q + uDw.z*o + vec2(1.7,9.2)*fi), fbm(q + uDw.z*o + vec2(8.3,2.8)*fi));
+      dwo = vec2(fbm(q + uDw.z*dwo + vec2(1.7,9.2)*fi), fbm(q + uDw.z*dwo + vec2(8.3,2.8)*fi));
     }
-    float v = fbm(q + uDw.z*o);
-    wv = o - 0.5;
-    vec3 s = cosPal(v*uDw.w + length(o)*0.6, uPal[0], uPal[1], uPal[2], uPal[3]) * (0.35 + 0.9*v);
-    col = layer(col, s, uDw.x, uBl.y);
+    dwv = fbm(q + uDw.z*dwo);
+    wv = dwo - 0.5;
   }
 #endif
-#ifdef SRC_PH
-  {
-    vec2 zp = crot(z - uPhT.xy, -uPhT.z) / uPh.y * uPhFlip;
-    vec2 uv = (zp + wv*uPh.z*2.0) * uPhAsp * 0.5 + 0.5;
-    float inside = 1.0;
-    vec2 tuv = mirror(uv);
-    if (uPhEdge > 1.5) { inside = step(0.0, uv.x)*step(uv.x, 1.0)*step(0.0, uv.y)*step(uv.y, 1.0); tuv = clamp(uv, 0.0, 1.0); }
-    else if (uPhEdge > 0.5) tuv = fract(uv);
-    vec3 s = texture2D(uPhoto, tuv).rgb;
-    s = hueShift(s, uPh.w);
-    s = mix(vec3(luma(s)), s, uPhSat);
-    col = layer(col, s, uPh.x*inside, uBl.x);
-  }
-#endif
-#ifdef SRC_QC
-  {
-    float sum = 0.0; int n = int(uQc2.x);
-    float ph = uQc.z + uQc2.y*length(z);
-    for (int i=0;i<16;i++){
-      if (i >= n) break;
-      float a = float(i)*PI/uQc2.x;
-      sum += cos(dot(z, vec2(cos(a), sin(a)))*uQc.y + ph);
-    }
-    sum /= uQc2.x;
-    float v = sum*uQc.w;
-    if (uQc2.z > 1.5) v = smoothstep(-0.05, 0.05, sum)*0.5 + sum*0.1;
-    else if (uQc2.z > 0.5) v = abs(sum)*uQc.w;
-    float lum = 0.55 + 0.45*clamp(sum*1.5 + 0.3, -1.0, 1.0);
-    vec3 s = cosPal(v*0.5, uPal[4], uPal[5], uPal[6], uPal[7]) * lum;
-    col = layer(col, s, uQc.x, uBl.z);
-  }
-#endif
-#ifdef SRC_RD
-  {
-    vec2 uv = mirror(z/uRd.y*0.5 + 0.5 + wv*0.05);
-    float v = texture2D(uRD, uv).g;
-    v = clamp(v*2.5, 0.0, 1.0);
-    if (uRd.z > 0.5) v = 1.0 - v;
-    vec3 s = cosPal(v*uRd.w*0.5, uPal[8], uPal[9], uPal[10], uPal[11]) * smoothstep(0.0, 0.35, v);
-    col = layer(col, s, uRd.x, uBl.w);
-  }
-#endif
-#ifdef SRC_PY
-  {
-    vec2 uv = mirror(z/uPy.y*0.5 + 0.5 + wv*0.05);
-    float t = texture2D(uPY, uv).r;
-    float v = 1.0 - exp(-t*uPy.z);
-    vec3 s = cosPal(v*0.85, uPal[12], uPal[13], uPal[14], uPal[15]) * v * 1.2;
-    col = layer(col, s, uPy.x, uBl2.x);
-  }
-#endif
-#ifdef SRC_FR
-  {
-    // escape-time fractal with orbit traps. uFr: op, zoom, iters, density. uFr2: type, trap, cx, cy
-    vec2 p = z / uFr.y + uFr2.zw;
-    vec2 c = uFrC, w = p;
-    if (uFr2.x > 0.5 && uFr2.x < 1.5) { c = p; w = vec2(0.0); }
-    float trap = 1e9, n = 0.0, m2 = 0.0, esc = 0.0;
-    for (int i=0;i<200;i++){
-      if (float(i) >= uFr.z) break;
-      if (uFr2.x > 1.5) w = abs(w);
-      w = cmul(w, w) + c;
-      m2 = dot(w, w);
-      float t = uFr2.y < 1.5 ? m2 : (uFr2.y < 2.5 ? abs(sqrt(m2) - 0.7) : min(abs(w.x), abs(w.y)));
-      trap = min(trap, t);
-      if (m2 > 256.0) { esc = 1.0; break; }
-      n += 1.0;
-    }
-    float v, lum;
-    if (uFr2.y < 0.5) {
-      float sn = n - log2(max(log2(max(m2, 1.0001)), 1e-4)) + 4.0;
-      v = sn * 0.035 * uFr.w; lum = esc * (0.25 + 0.75*smoothstep(0.0, 6.0, sn));
-    } else {
-      float st = sqrt(trap);
-      v = st * 1.6 * uFr.w + n * 0.015;
-      lum = 0.28 + 0.95*exp(-st * 2.5);
-    }
-    vec3 s = cosPal(v, uPal[16], uPal[17], uPal[18], uPal[19]) * lum;
-    col = layer(col, s, uFr.x, uBl2.y);
-  }
-#endif
-#ifdef SRC_PT
-  {
-    // op-art patterns. uPt: op, scale, count, sharp. uPt2: mode, phase, twist, _
-    vec2 q = z * uPt.y;
-    float r = length(q), a = atan(q.y, q.x), v = 0.0, edge = 1.0;
-    float ph = uPt2.y, k = uPt.z, sh = uPt.w;
-    if (uPt2.x < 0.5) {                      // hypnotic spiral
-      float sw = sin(k*a + uPt2.z*log(r + 1e-3)*6.0 - ph);
-      v = 0.5 + 0.5*clamp(sw*sh, -1.0, 1.0);
-    } else if (uPt2.x < 1.5) {               // moire rings
-      vec2 o = 0.35*vec2(cos(ph), sin(ph));
-      float m = sin(length(q - o)*k*3.0) * sin(length(q + o)*k*3.0 + uPt2.z*a);
-      v = 0.5 + 0.5*clamp(m*sh, -1.0, 1.0);
-    } else if (uPt2.x < 2.5) {               // voronoi cells
-      vec2 g = floor(q*k*0.5), f = fract(q*k*0.5);
-      float d1 = 8.0, d2 = 8.0; float id = 0.0;
-      for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){
-        vec2 b = vec2(float(x), float(y));
-        float h = hash12(g + b);
-        vec2 o = 0.5 + 0.4*sin(ph + TAU*vec2(h, hash12(g + b + 17.3)));
-        float d = length(b + o - f);
-        if (d < d1) { d2 = d1; d1 = d; id = h; } else if (d < d2) d2 = d;
-      }
-      v = id + uPt2.z*d1;
-      edge = smoothstep(0.0, 0.08/max(sh*0.25, 0.05), d2 - d1);
-    } else if (uPt2.x < 3.5) {               // truchet arcs
-      vec2 g = floor(q*k*0.5), f = fract(q*k*0.5) - 0.5;
-      if (hash12(g) > 0.5) f.x = -f.x;
-      float d = min(abs(length(f - 0.5) - 0.5), abs(length(f + 0.5) - 0.5));
-      float band = 0.5 + 0.5*sin(d*TAU*2.0 - ph + uPt2.z*r);
-      v = band + hash12(g)*0.3;
-      edge = smoothstep(0.02, 0.02 + 0.3/max(sh, 0.2), 0.25 - d) * 0.8 + 0.2;
-    } else {                                 // warped checker
-      vec2 w = q*k*0.5 + 0.35*vec2(sin(q.y*2.0 + ph), sin(q.x*2.0 - ph)) + uPt2.z*vec2(-q.y, q.x)*0.2;
-      float c = sin(w.x*PI)*sin(w.y*PI);
-      v = 0.5 + 0.5*clamp(c*sh, -1.0, 1.0);
-      v += 0.15*r;
-    }
-    vec3 s = cosPal(v, uPal[20], uPal[21], uPal[22], uPal[23]) * edge;
-    col = layer(col, s, uPt.x, uBl2.z);
-  }
-#endif
-  gl_FragColor = vec4(max(col, 0.0), 1.0);
+${layerCode(S.order)}  gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
 }

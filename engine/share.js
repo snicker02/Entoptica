@@ -1,6 +1,6 @@
 // Entoptica — shareable links: settings diffed against defaults, deflated, base64url in the URL hash.
 // Format:  #s=z<base64url(deflate-raw(json))>   or   #s=j<base64url(json)> when CompressionStream is unavailable.
-import { CONTROLS, defaults, normOrder, modulatable } from './params.js';
+import { CONTROLS, defaults, normOrder, normPP, modulatable } from './params.js';
 
 // Device / output preferences are not part of a "look"
 const SKIP = (k) => CONTROLS[k] && CONTROLS[k].sec === 'out';
@@ -30,6 +30,7 @@ export function diffState(P) {
       continue;
     }
     if (k === 'lay') { const o = normOrder(P.lay); if (o.join() !== D.lay.join()) out.lay = o; continue; }
+    if (k === 'pp') { const o = normPP(P.pp); if (o.join() !== D.pp.join()) out.pp = o; continue; }
     const v = round(P[k]);
     if (JSON.stringify(v) !== JSON.stringify(D[k])) out[k] = v;
   }
@@ -59,6 +60,8 @@ export async function decodeState(code) {
     if (!(k in D) || SKIP(k)) continue;
     const v = raw[k];
     if (k === 'lay') { out.lay = normOrder(v); continue; }
+    if (k === 'pp') { out.pp = normPP(v); continue; }
+    if (k === 'co') { out.co = v ? 1 : 0; continue; }
     if (k === 'mod') {
       out.mod = {};
       if (v && typeof v === 'object') for (const key in v) {

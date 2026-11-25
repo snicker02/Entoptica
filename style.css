@@ -130,3 +130,11 @@ button.lfo { padding: 0 6px; font-size: 12px; line-height: 16px; border-radius: 
 .lfrow select { grid-column: 2 / 4; }
 .lfrow.end { display: flex; justify-content: flex-end; margin-top: 3px; }
 @media (pointer: coarse) { button.lfo { min-height: 28px; padding: 0 10px; } }
+
+/* ---------- pipeline panel groups ---------- */
+.lgroup { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.lgtitle { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--acc); margin-top: 2px; }
+.lsub { display: flex; flex-direction: column; gap: 3px; margin-left: 18px; border-left: 2px solid var(--line); padding-left: 6px; }
+.lrow.small { padding: 1px 5px; }
+.lrow.small .lname { font-weight: 500; font-size: 12px; }
+.lfixed { grid-column: span 2; text-align: center; color: var(--dim); }

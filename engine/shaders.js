@@ -232,10 +232,27 @@ const LAYER_CODE = {
 `,
 };
 export const DEFAULT_ORDER = ['dw', 'ph', 'qc', 'rd', 'py', 'fr', 'pt'];
-function layerCode(order) {
+// Coordinate routes per layer: 0 = Symmetry + Maps, 1 = Symmetry only, 2 = Maps only, 3 = straight (view only)
+export const ROUTE_NAMES = ['Symmetry + Maps', 'Symmetry only', 'Maps only', 'Straight (no warp)'];
+function layerCode(order, routes) {
   const seen = new Set(), list = [];
   for (const k of [...(order || []), ...DEFAULT_ORDER]) if (LAYER_CODE[k] && !seen.has(k)) { seen.add(k); list.push(k); }
-  return list.map(k => `#ifdef SRC_${k.toUpperCase()}\n${LAYER_CODE[k]}#endif\n`).join('');
+  return list.map(k => `#ifdef SRC_${k.toUpperCase()}\n  { vec2 z = zR${(routes && routes[k]) | 0};\n${LAYER_CODE[k]}  }\n#endif\n`).join('');
+}
+// Emit only the coordinate variants that enabled layers actually use
+function coordCode(S) {
+  const R = S.routes || {}, used = new Set();
+  for (const k of DEFAULT_ORDER) if (S[k]) used.add((R[k] | 0));
+  if (S.dw) used.add(R.dw | 0);
+  if (!used.size) used.add(0);
+  let maps = '';
+  S.maps.forEach((t, i) => { maps += mapCode(t, i); });
+  const sym = symCode(S.sym);
+  const guard = '  if (!(abs(z.x) < 1e4)) z.x = 1e4; if (!(abs(z.y) < 1e4)) z.y = 1e4;\n';
+  const body = { 0: S.co ? maps + sym : sym + maps, 1: sym, 2: maps, 3: '' };
+  let out = '';
+  for (const r of [0, 1, 2, 3]) out += `  vec2 zR${r} = z0;\n` + (used.has(r) ? `  { vec2 z = z0;\n${body[r]}${guard}  zR${r} = z; }\n` : '');
+  return out;
 }
 
 export function composeFS(S) {
@@ -249,8 +266,6 @@ export function composeFS(S) {
   if (S.fr) D.push('#define SRC_FR');
   if (S.pt) D.push('#define SRC_PT');
   D.push(`#define DW_OCT ${S.dwOct | 0}`, `#define DW_ITER ${S.dwIter | 0}`, `#define DW_BASIS ${S.dwBasis | 0}`);
-  let maps = '';
-  S.maps.forEach((t, i) => { maps += mapCode(t, i); });
   return PREC + D.join('\n') + '\n' + COMMON + `
 varying vec2 vUv;
 uniform vec2 uRes;
@@ -341,17 +356,15 @@ float fbm(vec2 p){
 }
 
 void main(){
-  vec2 z = (vUv - 0.5) * vec2(uRes.x/uRes.y, 1.0) * 2.0;
-  z = crot(z, uView.w) / uView.z + uView.xy;
-${symCode(S.sym)}
-${maps}
-  if (!(abs(z.x) < 1e4)) z.x = 1e4; if (!(abs(z.y) < 1e4)) z.y = 1e4;
+  vec2 z0 = (vUv - 0.5) * vec2(uRes.x/uRes.y, 1.0) * 2.0;
+  z0 = crot(z0, uView.w) / uView.z + uView.xy;
+${coordCode(S)}
   vec3 col = vec3(0.0);
   // warp field is computed up front so photo/RD/physarum displacement works whatever the layer order
   vec2 wv = vec2(0.0);
 #ifdef SRC_DW
   vec2 dwo = vec2(0.0); float dwv = 0.0;
-  {
+  { vec2 z = zR${(S.routes && S.routes.dw) | 0};
     vec2 q = z*uDw.y + uDwFlow;
     for (int i=0;i<DW_ITER;i++){
       float fi = float(i+1);
@@ -361,7 +374,7 @@ ${maps}
     wv = dwo - 0.5;
   }
 #endif
-${layerCode(S.order)}  gl_FragColor = vec4(max(col, 0.0), 1.0);
+${layerCode(S.order, S.routes)}  gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
 }
@@ -440,17 +453,14 @@ void main(){
 }
 `;
 
-// ---------- post (FX distortions + stylize + color) ----------
-export const POST_FS = PREC + COMMON + `
+// ---------- FX (screen-space distortion + stylize) — its own pass so it can be reordered in the image chain ----------
+export const FX_FS = PREC + COMMON + `
 varying vec2 vUv;
-uniform sampler2D uImg, uBloom; uniform vec2 uRes;
-uniform vec4 uPo;  // chroma, bloom, edge, sat
-uniform vec4 uPo2; // con, bri, hue, vig
-uniform vec4 uPo3; // grain, invert, time, _
+uniform sampler2D uImg; uniform vec2 uRes;
 uniform vec4 uFx;  // ripple amp, ripple freq, ripple phase, swirl
 uniform vec4 uFx2; // glitch, slices, glitch step, liquid rgb
 uniform vec4 uFx3; // pixelate px, halftone amt, halftone px, solarize
-uniform vec4 uFx4; // scanlines, swirl radius, kaleido-mirror, _
+uniform vec4 uFx4; // scanlines, swirl radius, mirror, _
 vec2 fxUv(vec2 uv){
   float asp = uRes.x/uRes.y, unit = uRes.y/1080.0;
   if (uFx3.x > 1.0) { vec2 px = vec2(uFx3.x*unit)/uRes; uv = (floor(uv/px) + 0.5)*px; }
@@ -470,8 +480,7 @@ vec2 fxUv(vec2 uv){
 }
 void main(){
   vec2 uv = fxUv(vUv);
-  vec2 q = vUv - 0.5;
-  vec2 off = (uv - 0.5) * uPo.x * 4.0;
+  vec2 off = vec2(0.0);
   if (uFx2.w > 0.0) {
     vec2 e = 6.0/uRes;
     vec2 g = vec2(luma(texture2D(uImg, uv+vec2(e.x,0.0)).rgb) - luma(texture2D(uImg, uv-vec2(e.x,0.0)).rgb),
@@ -484,6 +493,34 @@ void main(){
     float band = floor(uv.y*uFx2.y*0.5);
     if (hash12(vec2(band + 5.0, uFx2.z)) > 1.0 - uFx2.x*0.3) c = c.gbr;
   }
+  if (uFx3.w > 0.0) { vec3 cl = clamp(c, 0.0, 1.0); vec3 so = mix(cl, 1.0 - cl, step(0.5, cl)) * 2.0; c = mix(c, so, uFx3.w); }
+  if (uFx3.y > 0.0) {
+    float cs = max(2.0, uFx3.z*uRes.y/1080.0);
+    vec2 rc = crot(gl_FragCoord.xy, 0.785398);
+    vec2 cell = (floor(rc/cs) + 0.5)*cs;
+    vec2 ctr = crot(cell, -0.785398);
+    vec3 cc = texture2D(uImg, fxUv(ctr/uRes)).rgb;
+    float rad = sqrt(clamp(luma(cc), 0.0, 1.0)) * cs * 0.72;
+    float dotm = 1.0 - smoothstep(rad - 1.0, rad + 1.0, length(rc - cell));
+    c = mix(c, cc*1.15*dotm, uFx3.y);
+  }
+  if (uFx4.x > 0.0) c *= 1.0 - uFx4.x*0.6*(0.5 + 0.5*sin(gl_FragCoord.y*PI*(1080.0/uRes.y)*0.5));
+  gl_FragColor = vec4(clamp(c, 0.0, 4.0), 1.0);
+}
+`;
+
+// ---------- post (always last: chroma, edge glow, bloom, color, vignette, tone, grain) ----------
+export const POST_FS = PREC + COMMON + `
+varying vec2 vUv;
+uniform sampler2D uImg, uBloom; uniform vec2 uRes;
+uniform vec4 uPo;  // chroma, bloom, edge, sat
+uniform vec4 uPo2; // con, bri, hue, vig
+uniform vec4 uPo3; // grain, invert, time, _
+void main(){
+  vec2 uv = vUv;
+  vec2 q = vUv - 0.5;
+  vec2 off = q * uPo.x * 4.0;
+  vec3 c = vec3(texture2D(uImg, uv + off).r, texture2D(uImg, uv).g, texture2D(uImg, uv - off).b);
   if (uPo.z > 0.0) {
     vec2 e = 1.0/uRes;
     float tl = luma(texture2D(uImg, uv+e*vec2(-1.0,1.0)).rgb), t = luma(texture2D(uImg, uv+e*vec2(0.0,1.0)).rgb), tr = luma(texture2D(uImg, uv+e*vec2(1.0,1.0)).rgb);
@@ -497,19 +534,6 @@ void main(){
   float L = luma(c);
   c = mix(vec3(L), c, uPo.w);
   c = (c - 0.5)*uPo2.x + 0.5 + uPo2.y;
-  if (uFx3.w > 0.0) { vec3 so = mix(c, 1.0 - c, step(0.5, c)) * 2.0; c = mix(c, so, uFx3.w); }
-  if (uFx3.y > 0.0) {
-    float cs = max(2.0, uFx3.z*uRes.y/1080.0);
-    vec2 fc = gl_FragCoord.xy;
-    vec2 rc = crot(fc, 0.785398);
-    vec2 cell = (floor(rc/cs) + 0.5)*cs;
-    vec2 ctr = crot(cell, -0.785398);
-    vec3 cc = texture2D(uImg, fxUv(ctr/uRes)).rgb;
-    float rad = sqrt(clamp(luma(cc), 0.0, 1.0)) * cs * 0.72;
-    float dotm = 1.0 - smoothstep(rad - 1.0, rad + 1.0, length(rc - cell));
-    c = mix(c, cc*1.15*dotm, uFx3.y);
-  }
-  if (uFx4.x > 0.0) c *= 1.0 - uFx4.x*0.6*(0.5 + 0.5*sin(gl_FragCoord.y*PI*(1080.0/uRes.y)*0.5));
   c *= 1.0 - uPo2.w*dot(q,q)*2.0;
   c = c / (1.0 + max(c - 1.0, 0.0)*0.5);
   if (uPo3.y > 0.5) c = 1.0 - c;

@@ -1,11 +1,11 @@
-# Entoptica v0.5.0
+# Entoptica v0.6.0
 
 *Entoptic phenomena are visual effects whose source is within the eye itself: phosphenes, form constants, the shimmer behind closed eyelids.*
 
 A psychedelic image engine built as a layer pipeline. Every stage can be stacked, randomized and animated:
 
 ```
-SOURCES ──► CONFORMAL MAPS ──► SYMMETRY ──► FEEDBACK ──► PALETTE CYCLING ──► FX ──► POST
+SYMMETRY ⇄ MAPS (per-layer routing) ──► LAYERS (your order) ──► FEEDBACK / PALETTE / FX (your order) ──► POST
 photo/video/camera   4-slot stack     8 modes      zoom/rotate/hue   cosine palettes    bloom, chroma,
 domain warp          (13 maps)                     4 blend modes     luma/hue index     edge glow, grain
 quasicrystal                                                         posterize          vignette, tone
@@ -31,8 +31,16 @@ In the Photo section, set position X/Y, rotation, scale and horizontal/vertical 
 ## FX (screen space, before Post)
 Ripple (loops with the animation), swirl, glitch slices (stepped per loop), liquid RGB, pixelate, halftone (45° screen), solarize, scanlines, left↔right mirror.
 
-## Layers
-The **Layers** panel (top of the left sidebar) lists every source. The top of the list is drawn last, in front. Use ▲/▼ to restack. Order matters because each layer blends onto everything below it: a photo in Overlay over a fractal looks nothing like the fractal over the photo. Tick a layer to enable it, or tap its name to jump to its settings. The 🎲 on the panel shuffles the stack.
+## Pipeline panel
+The **Pipeline** panel (top of the left sidebar; the first tab on phones) shows the whole chain, top to bottom.
+
+- **Coordinates:** Symmetry and Maps bend the space every layer is sampled from. Use ▲/▼ to swap their order, since kaleidoscope-then-warp looks completely different from warp-then-kaleidoscope. The four map slots can be reordered too, and each slot's settings and LFOs move with it.
+- **Layers:** the sources. The top of the list is drawn last, in front, and each layer blends onto everything below it. Use ▲/▼ to restack, the checkbox to enable, and the name to jump to its settings.
+  - Each layer also has a **Coordinates** route in its own section: *Symmetry + Maps*, *Symmetry only*, *Maps only* or *Straight*. That lets a sharp, undistorted photo sit over a kaleidoscoped fractal.
+- **Image chain:** Feedback, Palette and FX run on the finished stack in the order shown, and **Post** (bloom, colour, vignette, grain) is always last. For example, FX before Feedback smears glitches into the trails, and Palette after FX recolours the halftone dots.
+  - *Loop the whole chain* (Feedback) feeds the end of the chain back, not just the feedback output.
+
+The 🎲 on the panel shuffles the layers. Sometimes it also flips the coordinate order or shuffles the image chain.
 
 ## Modulation (LFOs)
 Every live slider has a **~** button. Click it to attach an LFO with these settings:
@@ -87,6 +95,7 @@ WebGL1, no dependencies, ES modules: `index.html`, `main.js`, `engine/` (`gl`, `
 Serve over HTTP (ES modules don't load from `file://`), e.g. `python3 -m http.server`.
 
 ## Changelog
+- **0.6.0** — The **Pipeline** panel adds Coordinates (swap Symmetry ⇄ Maps, reorder map slots) and an **Image chain** (reorder Feedback / Palette / FX; Post always last) alongside the layer stack. Per-layer **Coordinates** routing: Symmetry + Maps, Symmetry only, Maps only, or Straight. FX now runs as its own pass. *Loop the whole chain* replaces *Palette inside loop*. Share links carry the new order and routing.
 - **0.5.0** — **Layers** panel: restack sources with ▲/▼, enable them, and jump to their settings. The warp field is now computed before compositing, so displacement works in any order. **LFO modulation** on every live slider: 7 waves, whole cycles per loop so loops stay seamless, live indicator dot, *Random LFOs* / *Clear all*. **🔗 Share links**: compressed settings in the URL hash, loaded on open.
 - **0.4.0** — Warp gets a **Wave type** selector with 12 bases. 11 new maps: Sinh, Tanh, Bulge/pinch, Flower, Sine ripple, Kali fold, Bipolar log, Newton (z³−1), Rational zⁿ + b/zⁿ, Log twist, Loxodromic. Each map's spin control animates it seamlessly over the loop.
 - **0.3.0**: adds the shared **⇄ Shelf** in the header. You can send the current frame to other snicker02 apps, and load shelf images as the photo source. PNG rendering is factored into `renderCanvas()`/`renderBlob()`.

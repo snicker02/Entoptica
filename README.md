@@ -1,4 +1,4 @@
-# Entoptica v0.3.0
+# Entoptica v0.4.0
 
 *Entoptic phenomena are visual effects whose source is within the eye itself: phosphenes, form constants, the shimmer behind closed eyelids.*
 
@@ -17,7 +17,7 @@ pattern
 
 ## Sources (all can run at once, each with opacity and 8 blend modes)
 - **Photo** — image, video file or live camera, with optional displacement by the warp field.
-- **Domain warp** — iterated fbm warping (`f(p + f(p + f(p)))`), up to 6 octaves and 4 warp levels.
+- **Domain warp** — iterated fbm warping (`f(p + f(p + f(p)))`), up to 6 octaves and 4 warp levels. 12 wave types: value noise, gradient noise, ridged, turbulence, sine grid, triangle, square, cellular, cellular edges, 3-wave interference, ripple cells, spiral cells.
 - **Quasicrystal** — N plane waves at equal angles (3–16), smooth, folded or thresholded.
 - **Reaction-Diffusion** — Gray-Scott on the GPU, with feed/kill varied by noise or the photo, curl-flow advection, and 4 seed patterns.
 - **Physarum** — up to 1M slime-mold agents with sensor/turn steering, photo attraction, and 4 spawn patterns.
@@ -31,8 +31,8 @@ In the Photo section, set position X/Y, rotation, scale and horizontal/vertical 
 ## FX (screen space, before Post)
 Ripple (loops with the animation), swirl, glitch slices (stepped per loop), liquid RGB, pixelate, halftone (45° screen), solarize, scanlines, left↔right mirror.
 
-## Conformal map stack (4 slots)
-Droste spiral (seamless, integer strands), power zⁿ, Möbius disk automorphism, Blaschke product, exp, log spiral, sin, tan, Joukowski, circle inversion, twirl + ripple, tunnel, Julia warp.
+## Map stack (4 slots, 24 maps)
+Droste spiral (seamless, integer strands), power zⁿ, Möbius disk automorphism, Blaschke product, exp, log spiral, sin, tan, sinh, tanh, Joukowski, circle inversion, bipolar log, loxodromic Möbius, log twist, rational zⁿ + b/zⁿ, Newton (z³−1) iteration, Julia warp, Kali fold, twirl + ripple, sine ripple, bulge/pinch, flower, tunnel.
 
 ## Symmetry
 Mirror X, mirror XY, kaleidoscope (dihedral), rotational, square p4m tiling, hex tiling, and inversion mirror.
@@ -71,6 +71,7 @@ WebGL1, no dependencies, ES modules: `index.html`, `main.js`, `engine/` (`gl`, `
 Serve over HTTP (ES modules don't load from `file://`), e.g. `python3 -m http.server`.
 
 ## Changelog
+- **0.4.0** — Warp gets a **Wave type** selector with 12 bases. 11 new maps: Sinh, Tanh, Bulge/pinch, Flower, Sine ripple, Kali fold, Bipolar log, Newton (z³−1), Rational zⁿ + b/zⁿ, Log twist, Loxodromic. Each map's spin control animates it seamlessly over the loop.
 - **0.3.0**: adds the shared **⇄ Shelf** in the header. You can send the current frame to other snicker02 apps, and load shelf images as the photo source. PNG rendering is factored into `renderCanvas()`/`renderBlob()`.
 - **0.2.1** — renamed from Ekstasis to **Entoptica**. Saved settings, section locks, last tab and the confirm choice migrate automatically from the old name. Export files are now named `entoptica_v…`.
 - **0.2.0** — move/rotate/scale/flip the base image (sliders + canvas “Moving image” mode). New sources: Fractal (Julia/Mandelbrot/Burning Ship with orbit traps) and Pattern (hypno spiral, moiré, Voronoi, Truchet, warped checker). New FX section: ripple, swirl, glitch slices, liquid RGB, pixelate, halftone, solarize, scanlines, mirror. New presets: Julia Trance, Hypno Glitch, Voronoi Acid, Halftone Pop. Fixed two-finger twist direction.

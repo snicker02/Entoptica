@@ -1,5 +1,5 @@
 // Entoptica — parameter schema, palettes, presets, randomizer
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export const BLENDS = ['Normal', 'Add', 'Screen', 'Multiply', 'Difference', 'Lighten', 'Overlay', 'Exclusion'];
 
@@ -20,7 +20,8 @@ export const PALETTES = [
 const PAL_OPTS = PALETTES.map(p => p[0]);
 
 export const MAP_TYPES = ['None', 'Droste spiral', 'Power zⁿ', 'Möbius (disk)', 'Blaschke', 'Exp', 'Log spiral',
-  'Sin', 'Tan', 'Joukowski', 'Circle inversion', 'Twirl + ripple', 'Tunnel', 'Julia warp'];
+  'Sin', 'Tan', 'Joukowski', 'Circle inversion', 'Twirl + ripple', 'Tunnel', 'Julia warp',
+  'Sinh', 'Tanh', 'Bulge / pinch', 'Flower', 'Sine ripple', 'Kali fold', 'Bipolar log', 'Newton (z³−1)', 'Rational zⁿ + b/zⁿ', 'Log twist', 'Loxodromic'];
 // [a range, b range, a default, b default, a label, b label, a step, b step]
 export const MAP_PARAMS = [
   [[0, 1], [0, 1], 0, 0, 'a', 'b', .01, .01],
@@ -37,6 +38,17 @@ export const MAP_PARAMS = [
   [[-8, 8], [0, .5], 2, .1, 'twirl', 'ripple', .01, .01],
   [[.2, 3], [-2, 2], 1, 0, 'depth', 'travel', .01, .01],
   [[1, 6], [-3.1416, 3.1416], 2, .5, 'iters', 'c angle', 1, .01],
+  [[.2, 4], [.1, 2], 1.8, .35, 'freq', 'amp', .01, .01],                 // 14 sinh
+  [[.2, 4], [.2, 2], 2, 1, 'freq', 'amp', .01, .01],                     // 15 tanh
+  [[.2, 3], [.1, 2], .5, 1, 'power', 'radius', .01, .01],                // 16 bulge/pinch (power 1 = none)
+  [[2, 16], [-.9, .9], 5, .4, 'petals', 'depth', 1, .01],               // 17 flower
+  [[.5, 16], [0, 1], 4, .15, 'freq', 'amp', .01, .01],                   // 18 sine ripple
+  [[1, 8], [.1, 1.4], 4, .6, 'iters', 'c', 1, .01],                      // 19 kali fold
+  [[.1, 2], [.1, 2], .8, .6, 'focus', 'scale', .01, .01],                // 20 bipolar
+  [[1, 8], [.2, 1.6], 3, 1, 'iters', 'relax', 1, .01],                   // 21 newton
+  [[1, 6], [-1.5, 1.5], 2, .5, 'n', 'b', 1, .01],                        // 22 rational
+  [[-6, 6], [.4, 1.6], 2, 1, 'twist', 'radial', .01, .01],               // 23 log twist
+  [[-1.5, 1.5], [-3.1416, 3.1416], .5, .8, 'expand', 'turn', .01, .01],  // 24 loxodromic
 ];
 
 export const SYM_TYPES = ['None', 'Mirror X', 'Mirror XY', 'Kaleidoscope', 'Rotational', 'Square tile (p4m)', 'Hex tile', 'Inversion mirror'];
@@ -81,6 +93,8 @@ export const SCHEMA = [
   { id: 'warp', title: 'Warp', ctl: [
     ...sourceHead('dw', false, .7, 2),
     R('dw_oct', 'Octaves', 1, 6, 1, 4, { struct: 1, r: [2, 5] }),
+    S('dw_wave', 'Wave type', ['Value noise', 'Gradient noise', 'Ridged', 'Turbulence', 'Sine grid', 'Triangle waves', 'Square waves',
+      'Cellular', 'Cellular edges', 'Interference', 'Ripple cells', 'Spiral cells'], 0, { struct: 1 }),
     R('dw_iter', 'Warp depth', 1, 4, 1, 2, { struct: 1 }),
     R('dw_scale', 'Scale', .1, 6, .01, 1.5),
     R('dw_str', 'Strength', 0, 8, .01, 3, { r: [.5, 6] }),

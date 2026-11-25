@@ -1,4 +1,4 @@
-# Entoptica v0.4.0
+# Entoptica v0.5.0
 
 *Entoptic phenomena are visual effects whose source is within the eye itself: phosphenes, form constants, the shimmer behind closed eyelids.*
 
@@ -31,6 +31,21 @@ In the Photo section, set position X/Y, rotation, scale and horizontal/vertical 
 ## FX (screen space, before Post)
 Ripple (loops with the animation), swirl, glitch slices (stepped per loop), liquid RGB, pixelate, halftone (45° screen), solarize, scanlines, left↔right mirror.
 
+## Layers
+The **Layers** panel (top of the left sidebar) lists every source. The top of the list is drawn last, in front. Use ▲/▼ to restack. Order matters because each layer blends onto everything below it: a photo in Overlay over a fractal looks nothing like the fractal over the photo. Tick a layer to enable it, or tap its name to jump to its settings. The 🎲 on the panel shuffles the stack.
+
+## Modulation (LFOs)
+Every live slider has a **~** button. Click it to attach an LFO with these settings:
+- **Wave:** sine, triangle, saw up/down, square, stepped random or smooth random.
+- **Cycles per loop:** −8…8.
+- **Depth:** a percentage of the slider's range.
+- **Phase.**
+
+Waves run a whole number of cycles per loop, so **Render one loop** stays seamless. The glowing dot under a modulated slider shows its live value; the slider itself keeps your base value. In **Motion**, *~ Random LFOs* adds three to sliders that are currently doing something, and *Clear all LFOs* removes them. LFOs are saved with undo/redo, JSON settings and share links.
+
+## Share links
+**🔗 Link** copies a URL that recreates the current look. It contains only the settings that differ from the defaults, deflate-compressed into the `#s=` hash. That includes layer order, LFOs, view, maps and everything else except device/output preferences. Your own photo isn't included; whoever opens the link sees the test card until they load an image. Opening a link applies it once, then clears the hash, so a refresh returns to a clean start. ↺ Last session is still available.
+
 ## Map stack (4 slots, 24 maps)
 Droste spiral (seamless, integer strands), power zⁿ, Möbius disk automorphism, Blaschke product, exp, log spiral, sin, tan, sinh, tanh, Joukowski, circle inversion, bipolar log, loxodromic Möbius, log twist, rational zⁿ + b/zⁿ, Newton (z³−1) iteration, Julia warp, Kali fold, twirl + ripple, sine ripple, bulge/pinch, flower, tunnel.
 
@@ -50,6 +65,7 @@ Every procedural parameter is driven by a loop phase, so **Render one loop** pro
 ## Controls
 - Mouse: drag to pan, wheel to zoom, right-drag or shift-drag to rotate, double-click to reset.
 - Touch: drag, pinch, two-finger pan/twist, double-tap to reset.
+- Header: **🔗 Link** copies a shareable link.
 - Keys: **M** toggle moving view/image · **R** randomize · **Space** play/pause · **Ctrl+Z / Ctrl+Shift+Z** undo/redo · **Enter** apply.
 - **Confirm changes before applying** (on by default): controls marked ◆ rebuild shaders or simulations, so they wait for **Apply**.
 - Each section has a 🎲 randomize button and a **lock** checkbox; global Randomize skips locked sections.
@@ -66,11 +82,12 @@ The **⇄ Shelf** button opens the image shelf shared by all apps on [snicker02.
 The shelf code lives in [`snicker02.github.io/shared/bridge.js`](https://github.com/snicker02/snicker02.github.io/blob/main/shared/bridge.js). If it can't load (for example when you're offline), the app works as before and the button is hidden.
 
 ## Tech
-WebGL1, no dependencies, ES modules: `index.html`, `main.js`, `engine/` (`gl`, `shaders`, `sims`, `params`, `ui`, `video`). On wide screens the sources sit in a left sidebar and the transform/colour/output stages in a right sidebar; on phones the view docks with a tab bar underneath. Reaction-Diffusion and Physarum need float render targets (Physarum also needs vertex texture fetch); devices without them show a note in those tabs.
+WebGL1, no dependencies, ES modules: `index.html`, `main.js`, `engine/` (`gl`, `shaders`, `sims`, `params`, `ui`, `video`, `share`). On wide screens the sources sit in a left sidebar and the transform/colour/output stages in a right sidebar; on phones the view docks with a tab bar underneath. Reaction-Diffusion and Physarum need float render targets (Physarum also needs vertex texture fetch); devices without them show a note in those tabs.
 
 Serve over HTTP (ES modules don't load from `file://`), e.g. `python3 -m http.server`.
 
 ## Changelog
+- **0.5.0** — **Layers** panel: restack sources with ▲/▼, enable them, and jump to their settings. The warp field is now computed before compositing, so displacement works in any order. **LFO modulation** on every live slider: 7 waves, whole cycles per loop so loops stay seamless, live indicator dot, *Random LFOs* / *Clear all*. **🔗 Share links**: compressed settings in the URL hash, loaded on open.
 - **0.4.0** — Warp gets a **Wave type** selector with 12 bases. 11 new maps: Sinh, Tanh, Bulge/pinch, Flower, Sine ripple, Kali fold, Bipolar log, Newton (z³−1), Rational zⁿ + b/zⁿ, Log twist, Loxodromic. Each map's spin control animates it seamlessly over the loop.
 - **0.3.0**: adds the shared **⇄ Shelf** in the header. You can send the current frame to other snicker02 apps, and load shelf images as the photo source. PNG rendering is factored into `renderCanvas()`/`renderBlob()`.
 - **0.2.1** — renamed from Ekstasis to **Entoptica**. Saved settings, section locks, last tab and the confirm choice migrate automatically from the old name. Export files are now named `entoptica_v…`.

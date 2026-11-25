@@ -1,11 +1,11 @@
 // Entoptica — panel builder, dual sidebars (desktop), phone tabs, confirm-before-apply
-import { SCHEMA, CONTROLS, rangeOf } from './params.js';
+import { SCHEMA, CONTROLS, rangeOf, modulatable, LFO_WAVES, LAYER_INFO, BLENDS, normOrder } from './params.js';
 
 const LS = 'entoptica.';
 const fmt = (v, step) => step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < .001 ? 4 : step < .01 ? 3 : 2);
 
 // Sections that live in the left sidebar on wide screens (the sources)
-export const LEFT_SECTIONS = ['photo', 'warp', 'quasi', 'fractal', 'pattern', 'rd', 'phys'];
+export const LEFT_SECTIONS = ['layers', 'photo', 'warp', 'quasi', 'fractal', 'pattern', 'rd', 'phys'];
 // Below this width both sidebars would crush the view, so everything merges into the right one
 const SPLIT_MQ = '(min-width: 1100px)';
 const TAB_MQ = '(max-width: 760px), (max-height: 500px) and (orientation: landscape)';
@@ -58,13 +58,24 @@ export class UI {
         const wrap = document.createElement('div'); wrap.className = 'ctl ' + c.t; wrap.dataset.k = c.k;
         if (c.t === 'range') {
           const lab = document.createElement('label'); const nm = document.createElement('span'); const val = document.createElement('span'); val.className = 'val';
-          lab.append(nm, val);
+          if (modulatable(c.k)) {
+            const tl = document.createElement('button'); tl.className = 'lfo'; tl.textContent = '~'; tl.title = 'Add / edit an LFO on this slider';
+            tl.onclick = (e) => { e.preventDefault(); this.toggleLFO(c.k); };
+            const right = document.createElement('span'); right.className = 'lright'; right.append(val, tl);
+            lab.append(nm, right);
+          } else lab.append(nm, val);
           const inp = document.createElement('input'); inp.type = 'range';
           wrap.append(lab, inp);
+          if (modulatable(c.k)) {
+            const bar = document.createElement('div'); bar.className = 'modbar'; const fill = document.createElement('i'); bar.append(fill);
+            const ed = document.createElement('div'); ed.className = 'lfoed'; ed.hidden = true;
+            wrap.append(bar, ed);
+            Object.assign(this.inputs[c.k] || (this.inputs[c.k] = {}), { bar, fill, ed });
+          }
           inp.addEventListener('input', () => this.onInput(c, +inp.value));
           inp.addEventListener('change', () => this.app.commit());
           inp.addEventListener('dblclick', () => { this.onInput(c, c.v); this.sync(c.k); this.app.commit(); });
-          this.inputs[c.k] = { inp, val, nm };
+          this.inputs[c.k] = Object.assign(this.inputs[c.k] || {}, { inp, val, nm });
         } else if (c.t === 'select') {
           const lab = document.createElement('label'); lab.textContent = c.label;
           const sel = document.createElement('select');
@@ -101,6 +112,7 @@ export class UI {
   }
 
   onInput(c, v) {
+    if (/^(dw|ph|qc|rd|py|fr|pt)_(on|op|bl)$/.test(c.k)) queueMicrotask(() => this.renderLayers());
     const P = this.app.P;
     P[c.k] = v;
     if (c.t === 'range') { const r = rangeOf(c, P); this.inputs[c.k].val.textContent = fmt(v, r.step); }
@@ -128,7 +140,89 @@ export class UI {
     else if (c.t === 'check') I.inp.checked = !!P[k];
   }
 
-  syncAll() { for (const k in CONTROLS) this.sync(k); this.refreshNotes(); }
+  syncAll() { for (const k in CONTROLS) this.sync(k); this.refreshNotes(); this.renderLayers(); this.syncMods(); }
+
+  // ---------- layers panel ----------
+  renderLayers() {
+    const sec = this.sections.layers; if (!sec) return;
+    let box = sec.querySelector('.layers'); if (!box) { box = document.createElement('div'); box.className = 'layers'; sec.append(box); }
+    const P = this.app.P, order = normOrder(P.lay);
+    box.innerHTML = '';
+    const hint = document.createElement('div'); hint.className = 'lhint'; hint.textContent = 'Top of the list is drawn last (in front). Each layer blends onto everything below it.';
+    box.append(hint);
+    [...order].reverse().forEach((k, idx, arr) => {
+      const [name, secId] = LAYER_INFO[k];
+      const row = document.createElement('div'); row.className = 'lrow' + (P[k + '_on'] ? '' : ' off');
+      const up = document.createElement('button'); up.className = 'mini'; up.textContent = '▲'; up.title = 'Move up (toward the front)'; up.disabled = idx === 0;
+      const dn = document.createElement('button'); dn.className = 'mini'; dn.textContent = '▼'; dn.title = 'Move down (toward the back)'; dn.disabled = idx === arr.length - 1;
+      up.onclick = () => this.app.moveLayer(k, +1); dn.onclick = () => this.app.moveLayer(k, -1);
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!P[k + '_on']; cb.title = 'Enable layer';
+      cb.onchange = () => { this.onInput(CONTROLS[k + '_on'], cb.checked); this.sync(k + '_on'); this.app.commit(); };
+      const nm = document.createElement('button'); nm.className = 'lname'; nm.textContent = name; nm.title = 'Open this layer’s settings';
+      nm.onclick = () => this.jumpTo(secId);
+      const info = document.createElement('span'); info.className = 'linfo';
+      info.textContent = `${BLENDS[P[k + '_bl'] | 0]} · ${Math.round((P[k + '_op'] ?? 1) * 100)}%`;
+      row.append(up, dn, cb, nm, info);
+      box.append(row);
+    });
+  }
+  jumpTo(secId) {
+    if (document.body.classList.contains('tabbed')) { this.openTab(secId); return; }
+    const el = this.sections[secId]; if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ---------- LFO editors ----------
+  toggleLFO(k) {
+    const P = this.app.P, I = this.inputs[k]; if (!I || !I.ed) return;
+    if (!P.mod) P.mod = {};
+    if (!P.mod[k]) { P.mod[k] = { w: 0, c: 1, d: .1, p: 0 }; I.ed.hidden = false; this.app.commit(); }
+    else I.ed.hidden = !I.ed.hidden;
+    this.syncMods();
+  }
+  buildEditor(k) {
+    const I = this.inputs[k], ed = I.ed, P = this.app.P;
+    ed.innerHTML = '';
+    const m = P.mod[k];
+    const row = (label, el, out) => { const r = document.createElement('div'); r.className = 'lfrow'; const l = document.createElement('span'); l.textContent = label; r.append(l, el); if (out) r.append(out); ed.append(r); };
+    const wave = document.createElement('select'); LFO_WAVES.forEach((w, i) => { const o = document.createElement('option'); o.value = i; o.textContent = w; wave.append(o); });
+    wave.value = m.w; wave.onchange = () => { m.w = +wave.value; this.app.commit(); };
+    row('Wave', wave);
+    const mk = (min, max, step, val, fmtf, set) => {
+      const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = val;
+      const out = document.createElement('span'); out.className = 'val'; out.textContent = fmtf(val);
+      inp.oninput = () => { const v = set(+inp.value); out.textContent = fmtf(v); if (v !== +inp.value) inp.value = v; };
+      inp.onchange = () => this.app.commit();
+      return [inp, out];
+    };
+    const [cyc, cyco] = mk(-8, 8, 1, m.c, v => `${v}×/loop`, v => { if (v === 0) v = m.c > 0 ? -1 : 1; m.c = v; return v; });
+    row('Cycles', cyc, cyco);
+    const [dep, depo] = mk(0, 1, .01, m.d, v => `${Math.round(v * 100)}%`, v => (m.d = v));
+    row('Depth', dep, depo);
+    const [ph, pho] = mk(0, 1, .01, m.p, v => `${Math.round(v * 360)}°`, v => (m.p = v));
+    row('Phase', ph, pho);
+    const rm = document.createElement('button'); rm.textContent = 'Remove LFO'; rm.className = 'mini';
+    rm.onclick = () => { delete P.mod[k]; this.syncMods(); this.app.commit(); };
+    const r = document.createElement('div'); r.className = 'lfrow end'; r.append(rm); ed.append(r);
+  }
+  syncMods() {
+    const P = this.app.P, mods = P.mod || {};
+    for (const k in this.inputs) {
+      const I = this.inputs[k]; if (!I || !I.ed) continue;
+      const on = !!mods[k];
+      I.ed.parentElement.classList.toggle('modded', on);
+      if (!on) { I.ed.hidden = true; I.ed.innerHTML = ''; I.bar.style.display = 'none'; continue; }
+      I.bar.style.display = '';
+      if (!I.ed.hidden || !I.ed.childElementCount) this.buildEditor(k);
+    }
+  }
+  updateModBars(E) {
+    const P = this.app.P;
+    for (const k in P.mod || {}) {
+      const I = this.inputs[k]; if (!I || !I.fill) continue;
+      const r = rangeOf(CONTROLS[k], E), t = (E[k] - r.min) / ((r.max - r.min) || 1);
+      I.fill.style.left = `${Math.max(0, Math.min(1, t)) * 100}%`;
+    }
+  }
 
   note(sec, html) {
     const el = this.sections[sec]; const n = el && el.querySelector(`[data-note="${sec}"]`);

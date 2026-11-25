@@ -452,8 +452,9 @@ class App {
   }
 
   // ---------- export ----------
-  savePNG() {
-    const gl = this.gl, P = this.P, sz = ['View', 2048, 4096, 8192][P.png_size];
+  // render the current frame offscreen at a PNG size index (0 = view size) → 2D canvas
+  renderCanvas(sizeIdx) {
+    const gl = this.gl, sz = ['View', 2048, 4096, 8192][sizeIdx | 0];
     let W = this.T.W, H = this.T.H;
     if (sz !== 'View') { const s = Math.min(sz, this.core.caps.maxOut, 4096 * 2) / Math.max(W, H); W = Math.round(W * s / 2) * 2; H = Math.round(H * s / 2) * 2; }
     const lim = Math.min(this.core.caps.maxOut, 8192);
@@ -473,9 +474,19 @@ class App {
       const x = c.getContext('2d'), id = x.createImageData(W, H), row = W * 4;
       for (let y = 0; y < H; y++) id.data.set(px.subarray((H - 1 - y) * row, (H - y) * row), y * row);
       x.putImageData(id, 0, 0);
-      c.toBlob(b => { download(b, `entoptica_v${VERSION}_${W}x${H}_${stamp()}.png`); this.toast(`Saved ${W}×${H} PNG`); }, 'image/png');
-    } catch (e) { this.toast('PNG export failed: ' + e.message); }
-    finally { this.freeTargets(T); }
+      return c;
+    } finally { this.freeTargets(T); }
+  }
+  renderBlob(sizeIdx) {
+    const c = this.renderCanvas(sizeIdx);
+    return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('PNG encode failed'))), 'image/png'));
+  }
+  savePNG() {
+    let c;
+    try { c = this.renderCanvas(this.P.png_size); }
+    catch (e) { this.toast('PNG export failed: ' + e.message); return; }
+    const W = c.width, H = c.height;
+    c.toBlob(b => { download(b, `entoptica_v${VERSION}_${W}x${H}_${stamp()}.png`); this.toast(`Saved ${W}×${H} PNG`); }, 'image/png');
   }
 
   busy(on, txt) { $('busy').hidden = !on; if (txt) $('busytxt').textContent = txt; }
@@ -651,3 +662,17 @@ class App {
 }
 
 window.entoptica = new App();
+
+// shared image shelf (snicker02.github.io/shared/bridge.js)
+if (window.SnickerShelf) {
+  const app = window.entoptica;
+  window.SnickerShelf.mount({
+    app: 'Entoptica',
+    button: $('shelfBtn'),
+    onImage: file => app.loadMedia(file),
+    getImage: () => app.renderBlob(0),
+    getMeta: () => ({ name: `entoptica_v${VERSION}_${stamp()}.png` }),
+  });
+} else {
+  $('shelfBtn').hidden = true;
+}

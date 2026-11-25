@@ -1,4 +1,4 @@
-# Entoptica v0.2.1
+# Entoptica v0.3.0
 
 *Entoptic phenomena are visual effects whose source is within the eye itself: phosphenes, form constants, the shimmer behind closed eyelids.*
 
@@ -54,12 +54,24 @@ Every procedural parameter is driven by a loop phase, so **Render one loop** pro
 - **Confirm changes before applying** (on by default): controls marked ◆ rebuild shaders or simulations, so they wait for **Apply**.
 - Each section has a 🎲 randomize button and a **lock** checkbox; global Randomize skips locked sections.
 
+## Shared image shelf
+
+The **⇄ Shelf** button opens the image shelf shared by all apps on [snicker02.github.io](https://snicker02.github.io/#shelf). It stores images in this browser only (IndexedDB), and every app on the site can read the same shelf.
+
+- **Save current** puts the current result on the shelf.
+- **Send to ↗** opens another app in a new tab with the image already loaded.
+- **Load here** loads a shelf image into this app. To add images to the shelf, use Add files, Paste, or drop them on the panel.
+- Opening the app with `?shelf=<id>` loads that shelf image on start. Send to uses this.
+
+The shelf code lives in [`snicker02.github.io/shared/bridge.js`](https://github.com/snicker02/snicker02.github.io/blob/main/shared/bridge.js). If it can't load (for example when you're offline), the app works as before and the button is hidden.
+
 ## Tech
 WebGL1, no dependencies, ES modules: `index.html`, `main.js`, `engine/` (`gl`, `shaders`, `sims`, `params`, `ui`, `video`). On wide screens the sources sit in a left sidebar and the transform/colour/output stages in a right sidebar; on phones the view docks with a tab bar underneath. Reaction-Diffusion and Physarum need float render targets (Physarum also needs vertex texture fetch); devices without them show a note in those tabs.
 
 Serve over HTTP (ES modules don't load from `file://`), e.g. `python3 -m http.server`.
 
 ## Changelog
+- **0.3.0**: adds the shared **⇄ Shelf** in the header. You can send the current frame to other snicker02 apps, and load shelf images as the photo source. PNG rendering is factored into `renderCanvas()`/`renderBlob()`.
 - **0.2.1** — renamed from Ekstasis to **Entoptica**. Saved settings, section locks, last tab and the confirm choice migrate automatically from the old name. Export files are now named `entoptica_v…`.
 - **0.2.0** — move/rotate/scale/flip the base image (sliders + canvas “Moving image” mode). New sources: Fractal (Julia/Mandelbrot/Burning Ship with orbit traps) and Pattern (hypno spiral, moiré, Voronoi, Truchet, warped checker). New FX section: ripple, swirl, glitch slices, liquid RGB, pixelate, halftone, solarize, scanlines, mirror. New presets: Julia Trance, Hypno Glitch, Voronoi Acid, Halftone Pop. Fixed two-finger twist direction.
 - **0.1.3** — two sidebars on wide screens (≥1100 px): Sources on the left (Photo, Warp, Quasicrystal, Reaction-Diffusion, Physarum); Maps, Symmetry, Feedback, Palette, Post, Motion and Output on the right. Narrower windows merge into the right sidebar; phones keep the docked view + tabs.

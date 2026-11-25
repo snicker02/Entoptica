@@ -1,5 +1,5 @@
 // Entoptica — parameter schema, palettes, presets, randomizer
-export const VERSION = '0.2.1';
+export const VERSION = '0.3.0';
 
 export const BLENDS = ['Normal', 'Add', 'Screen', 'Multiply', 'Difference', 'Lighten', 'Overlay', 'Exclusion'];
 

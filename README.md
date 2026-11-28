@@ -106,5 +106,10 @@ Serve over HTTP (ES modules don't load from `file://`), e.g. `python3 -m http.se
 - **0.1.1** — starts clean: base image only, no effects (post defaults are neutral). New **Base image only** preset; the previous session is restorable via **↺ Last session** in the preset menu.
 - **0.1.0** — first release: 5 sources, 13 conformal maps, 8 symmetries, feedback, palette cycling, post, A/B morph, PNG/MP4/WebM export, phone layout.
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ---
+
 Created with help from Claude AI
